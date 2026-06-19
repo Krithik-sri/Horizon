@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#0f1419" />
+  <!-- horizon line -->
+  <path d="M64 320 H448" stroke="#2dd4bf" stroke-width="20" stroke-linecap="round" />
+  <!-- your dot, riding the line -->
+  <circle cx="200" cy="320" r="34" fill="#2dd4bf" />
+  <circle cx="200" cy="320" r="58" fill="none" stroke="#2dd4bf" stroke-width="10" opacity="0.5" />
+</svg>

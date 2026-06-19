@@ -1,0 +1,12 @@
+node_modules
+dist
+dev-dist
+*.local
+.env
+.env.*
+!.env.example
+
+# generated PWA icons (run `npm run gen-icons`)
+public/icon-192.png
+public/icon-512.png
+public/apple-touch-icon.png

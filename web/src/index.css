@@ -1,0 +1,268 @@
+:root {
+  --bg: #0f1419;
+  --panel: #1a2129;
+  --panel-2: #232c36;
+  --text: #e6edf3;
+  --muted: #8b98a5;
+  --teal: #2dd4bf;
+  --blue: #38bdf8;
+  --danger: #f87171;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Respect the iOS notch / home indicator when installed fullscreen. */
+#root {
+  display: flex;
+  flex-direction: column;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.btn {
+  border: 1px solid var(--panel-2);
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 0.7rem 1rem;
+  border-radius: 0.6rem;
+  cursor: pointer;
+}
+.btn.primary {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #04221d;
+  font-weight: 600;
+  width: 100%;
+}
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text);
+}
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ---------- Lobby ---------- */
+.lobby {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+.lobby-card {
+  width: min(380px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--panel-2);
+  border-radius: 1rem;
+  padding: 1.75rem;
+}
+.brand {
+  margin: 0;
+  font-size: 2rem;
+  letter-spacing: -0.02em;
+}
+.tagline {
+  margin: 0.25rem 0 1.5rem;
+  color: var(--muted);
+}
+.field {
+  display: block;
+  margin-bottom: 1rem;
+}
+.field span {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+.field input,
+.code-input {
+  width: 100%;
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--panel-2);
+  background: var(--bg);
+  color: var(--text);
+}
+.divider {
+  text-align: center;
+  color: var(--muted);
+  margin: 1.25rem 0;
+  font-size: 0.85rem;
+  position: relative;
+}
+.divider::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--panel-2);
+}
+.divider span {
+  position: relative;
+  background: var(--panel);
+  padding: 0 0.6rem;
+}
+.join-row {
+  display: flex;
+  gap: 0.6rem;
+}
+.code-input {
+  flex: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-weight: 600;
+}
+.error {
+  color: var(--danger);
+  font-size: 0.85rem;
+  margin: 1rem 0 0;
+}
+
+/* ---------- Ride ---------- */
+.ride {
+  flex: 1;
+  position: relative;
+}
+.map {
+  position: absolute;
+  inset: 0;
+}
+
+.topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: calc(env(safe-area-inset-top) + 0.6rem) 0.8rem 0.6rem;
+  background: linear-gradient(to bottom, rgba(15, 20, 25, 0.85), transparent);
+  z-index: 2;
+}
+.ride-code {
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  background: rgba(26, 33, 41, 0.9);
+  padding: 0.35rem 0.7rem;
+  border-radius: 0.5rem;
+}
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.status .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.status.connected .dot {
+  background: var(--teal);
+}
+.status.connecting .dot,
+.status.reconnecting .dot {
+  background: #f59e0b;
+  animation: pulse 1s infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.standings {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  padding: 0.6rem 0.8rem calc(env(safe-area-inset-bottom) + 0.8rem);
+  background: linear-gradient(to top, rgba(15, 20, 25, 0.92), transparent);
+}
+.standings ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.standings li {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  background: rgba(26, 33, 41, 0.92);
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.6rem;
+}
+.standings li.me {
+  outline: 1.5px solid var(--teal);
+}
+.standings .pos {
+  width: 1.5rem;
+  height: 1.5rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--panel-2);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.standings .name {
+  flex: 1;
+  font-weight: 600;
+}
+.standings .speed {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.hint {
+  margin: 0;
+  color: var(--muted);
+  text-align: center;
+  background: rgba(26, 33, 41, 0.92);
+  padding: 0.6rem;
+  border-radius: 0.6rem;
+}
+
+/* ---------- Map markers ---------- */
+.rider-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--blue);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+}
+.rider-dot.self {
+  width: 20px;
+  height: 20px;
+  background: var(--teal);
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.35);
+}
