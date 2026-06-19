@@ -1,0 +1,8 @@
+# build output
+server
+server.exe
+
+# secrets — only .env.example is committed
+.env
+.env.*
+!.env.example

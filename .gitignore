@@ -1,1 +1,5 @@
 /.idea
+/mobile/node_modules
+/mobile/.vscode
+/web/node_modules
+/web/dist

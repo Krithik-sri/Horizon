@@ -47,8 +47,7 @@ Set the repo up in this order. Each step is self-contained.
 
 ---
 
-## Build order (don't skip ahead)
-
+## Build order 
 | Phase | Goal |
 |-------|------|
 | 0 | Map shows your own moving dot; server echoes WS messages. |
@@ -71,7 +70,3 @@ Set the repo up in this order. Each step is self-contained.
 | Realtime | Go | `github.com/gorilla/websocket` |
 | Realtime client | built-in | global `WebSocket` (no package) |
 | Voice | LiveKit | `@livekit/react-native` + LiveKit Cloud |
-
-## License
-
-Private project — add a license before sharing publicly.

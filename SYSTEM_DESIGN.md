@@ -20,8 +20,42 @@
 ### Non-goals (for now)
 - Public user accounts / social graph (anonymous join codes are enough at first).
 - Full turn-by-turn navigation for every rider (route line + your own nav is enough early on).
-- Web/desktop clients.
+- Desktop clients.
 - Offline maps.
+
+### Client decision: PWA first, native later
+The v1 client is an **installable PWA** (`web/`, Vite + React + TypeScript), not the React Native
+app — riders mount the phone on the handlebars with the screen on, so a screen **wake-lock** keeps
+foreground GPS alive and the one thing a browser can't do (true **background** location) never
+bites. This trades a faster iteration loop (no dev-client builds, one URL to share) against
+foreground-only tracking. The `mobile/` React Native app (tech stack below) stays the documented
+path for when pocketed / screen-off background tracking is needed (Phase 4). **The Go backend is
+client-agnostic — none of §5–§8 changes.** The browser uses the same `WebSocket`, the same
+`[lng,lat]` boundary conversion, and the same server-side standings. Web client map = MapLibre
+**GL JS**; voice = the LiveKit **JS** SDK; location = `navigator.geolocation` + `navigator.wakeLock`.
+
+The PWA client is the same shape as the native one in §3 — only the SDKs differ (browser APIs
+instead of Expo/RN modules); the three wires out of the phone are identical:
+
+```
+        ┌───────────────────────────────────────────────┐
+        │  Rider phone — installable PWA (in the browser) │
+        │                                                 │
+        │   Map UI         GPS + screen      Voice        │
+        │ (MapLibre GL JS) wake-lock        (LiveKit JS)  │
+        │                 (navigator.geo-    (PTT)        │
+        │                  location +                     │
+        │                  wakeLock)                      │
+        └──────┬────────────────┬───────────────┬─────────┘
+               │                │               │
+   map tiles   │   WebSocket    │   voice media (WebRTC)
+   (no key)    │  (loc ↑ /      │               │
+               ▼   state+welcome ▼              ▼
+        ┌──────────┐   ┌───────────────┐   ┌──────────┐
+        │OpenFreeMap│  │  Go server    │   │ LiveKit  │
+        │ (tiles)  │   │  (unchanged)  │   │  (voice) │
+        └──────────┘   └───────────────┘   └──────────┘
+```
 
 ### Design principles
 - **One source of truth for position.** All three features are different views of the same data: every rider's live coordinates. Build that pipe first; everything else is a view on top.
@@ -43,7 +77,7 @@
 ## 3. High-level architecture
 
 ```
-        ┌─────────────────────────────────────────────┐
+        ┌───────────────────────────────────────────────┐
         │   Rider phone — React Native (iOS + Android)  │
         │                                               │
         │   Map UI         GPS + position     Voice     │

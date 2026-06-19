@@ -30,11 +30,19 @@ Everything is a view on one thing: each rider's live coordinates flowing through
 
 ```
 backend/   Go realtime server (WebSocket hub, standings, LiveKit token, ORS route proxy)
-mobile/    React Native (Expo) app, TypeScript
+web/       Installable PWA (Vite + React + TypeScript) — the v1 client (see SETUP_WEB.md)
+mobile/    React Native (Expo) app, TypeScript — future native path (Phase 4 background GPS)
 SYSTEM_DESIGN.md   architecture + decisions (source of truth)
 SETUP_BACKEND.md   Go setup
+SETUP_WEB.md       PWA setup
 SETUP_MOBILE.md    Expo setup
 ```
+
+**Client is PWA-first** (`SYSTEM_DESIGN.md §1` "Client decision"). Riders mount the phone screen-on,
+so the `web/` PWA with a screen wake-lock covers v1; the React Native `mobile/` app stays the path
+for true background location. The Go backend is identical for both clients. Web equivalents of the
+native deps: MapLibre **GL JS** (`maplibre-gl`), LiveKit **JS** SDK, `navigator.geolocation` +
+`navigator.wakeLock`.
 
 ## Status
 
@@ -77,6 +85,10 @@ eas build --profile development --platform android # (re)build dev client when n
 Client → server, ~1×/sec:
 ```json
 { "type": "loc", "lat": 12.9716, "lng": 77.5946, "heading": 45, "speed": 6.2, "ts": 1718700000 }
+```
+Server → one client, once on connect (so it can pick its own dot out of `state`):
+```json
+{ "type": "welcome", "id": "a1" }
 ```
 Server → all clients in room, on each update:
 ```json
