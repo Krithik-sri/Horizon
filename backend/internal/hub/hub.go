@@ -56,6 +56,14 @@ func (h *Hub) ServeWS(w http.ResponseWriter, req *http.Request) {
 		name = "rider"
 	}
 
+	// Optional stable rider id, kept by the client across reconnects (mobile networks
+	// drop — CLAUDE.md). Presenting the same id lets the room replace the stale
+	// connection instead of seating a duplicate "ghost" rider. Absent/invalid → minted.
+	id := req.URL.Query().Get("rider")
+	if !validRiderID(id) {
+		id = genID()
+	}
+
 	conn, err := upgrader.Upgrade(w, req, nil)
 	if err != nil {
 		return // upgrader already wrote the HTTP error
@@ -66,7 +74,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, req *http.Request) {
 		room: room,
 		conn: conn,
 		send: make(chan []byte, 16),
-		id:   genID(),
+		id:   id,
 		name: name,
 	}
 
@@ -102,4 +110,21 @@ func genID() string {
 		b[i] = hex[rand.Intn(16)]
 	}
 	return string(b)
+}
+
+// validRiderID accepts client-supplied ids shaped like crypto.randomUUID() output:
+// 8–64 chars of [A-Za-z0-9_-]. Anything else falls back to a server-minted id.
+func validRiderID(s string) bool {
+	if len(s) < 8 || len(s) > 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }

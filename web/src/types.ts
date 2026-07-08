@@ -12,6 +12,9 @@ export interface LocMsg {
   ts: number; // unix seconds
 }
 
+// Grey a rider out once their last fix is older than this (SYSTEM_DESIGN.md §6).
+export const STALE_AFTER_SEC = 10;
+
 // One rider in the server → clients broadcast.
 export interface Rider {
   id: string;
@@ -19,6 +22,7 @@ export interface Rider {
   lat: number;
   lng: number;
   speed: number;
+  ageSec: number; // seconds since this rider's last fix (server clock)
   pos: number; // 1 = leading
   distAlong: number; // metres along the route (0 until a route is set, Phase 2)
 }

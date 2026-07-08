@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useRideStore } from "../store/ride";
+import { STALE_AFTER_SEC } from "../types";
 
 // Free tiles, no key, no card (CLAUDE.md). MapLibre GL JS is the browser sibling of the
 // native @maplibre/maplibre-react-native renderer the mobile app would use.
@@ -58,6 +59,7 @@ export function Map() {
 
       const el = marker.getElement();
       el.classList.toggle("self", isSelf);
+      el.classList.toggle("stale", r.ageSec > STALE_AFTER_SEC); // dead zone — last-known position
       el.dataset.pos = String(r.pos);
       el.title = isSelf ? `${r.name} (you)` : r.name;
     }

@@ -18,6 +18,7 @@ type riderState struct {
 	Lat       float64 `json:"lat"`
 	Lng       float64 `json:"lng"`
 	Speed     float64 `json:"speed"`
+	AgeSec    int     `json:"ageSec"` // seconds since this rider's last fix (server clock)
 	Pos       int     `json:"pos"`
 	DistAlong float64 `json:"distAlong"`
 }
@@ -54,6 +55,18 @@ func (r *Room) run() {
 		select {
 		case c := <-r.register:
 			r.mu.Lock()
+			// Rejoin policy: c.id is stable across reconnects (hub.go), so a client
+			// already seated with the same id is a zombie connection from before a
+			// network drop (or a second device presenting the same id).
+			//
+			// TODO(rejoin): decide what happens to it. Under this lock you can:
+			//   1. find any existing old *Client in r.rider with old.id == c.id
+			//   2. kick it — delete(r.rider, old) + close(old.send), exactly like
+			//      the unregister case (its pumps then shut down on their own)
+			//   3. optionally carry its last fix over (old.lat/lng/speed/lastSeen → c)
+			//      so the rider's dot unfreezes instead of vanishing until the next fix
+			// Until this is implemented, a reconnecting rider appears twice for up to
+			// ~60s (pongWait, client.go) — the ghost-rider bug.
 			r.rider[c] = true
 			r.mu.Unlock()
 		case c := <-r.unregister:
@@ -70,6 +83,7 @@ func (r *Room) run() {
 }
 
 func (r *Room) broadcast() {
+	now := time.Now()
 	r.mu.RLock()
 	riders := make([]riderState, 0, len(r.rider))
 	hasRoute := len(r.route) > 1
@@ -77,7 +91,8 @@ func (r *Room) broadcast() {
 		if c.lastSeen.IsZero() {
 			continue // hasn't sent a fix yet — don't draw a dot at (0,0)
 		}
-		rs := riderState{ID: c.id, Name: c.name, Lat: c.lat, Lng: c.lng, Speed: c.speed}
+		rs := riderState{ID: c.id, Name: c.name, Lat: c.lat, Lng: c.lng, Speed: c.speed,
+			AgeSec: int(now.Sub(c.lastSeen).Seconds())}
 		if hasRoute {
 			rs.DistAlong = standings.DistAlongRoute(r.route, standings.Pt{Lat: c.lat, Lng: c.lng})
 		}

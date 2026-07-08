@@ -266,3 +266,11 @@ input {
   background: var(--teal);
   box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.35);
 }
+/* Rider in a dead zone (no fix for a while) — last-known position, greyed. */
+.rider-dot.stale {
+  background: var(--muted);
+  opacity: 0.6;
+}
+.standings li.stale {
+  opacity: 0.55;
+}

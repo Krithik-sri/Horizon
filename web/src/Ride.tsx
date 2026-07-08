@@ -3,6 +3,7 @@ import { useRideSocket } from "./net/ws";
 import { useGeo } from "./location/useGeo";
 import { useWakeLock } from "./location/useWakeLock";
 import { Map } from "./map/Map";
+import { STALE_AFTER_SEC } from "./types";
 
 const STATUS_LABEL: Record<string, string> = {
   idle: "Idle",
@@ -41,13 +42,16 @@ export function Ride() {
           <p className="hint">Waiting for a GPS fix… (allow location access)</p>
         ) : (
           <ol>
-            {riders.map((r) => (
-              <li key={r.id} className={r.id === selfId ? "me" : ""}>
-                <span className="pos">{r.pos}</span>
-                <span className="name">{r.name}{r.id === selfId ? " (you)" : ""}</span>
-                <span className="speed">{(r.speed * 3.6).toFixed(1)} km/h</span>
-              </li>
-            ))}
+            {riders.map((r) => {
+              const stale = r.ageSec > STALE_AFTER_SEC; // dead zone — show last-seen, not a frozen speed
+              return (
+                <li key={r.id} className={`${r.id === selfId ? "me" : ""}${stale ? " stale" : ""}`}>
+                  <span className="pos">{r.pos}</span>
+                  <span className="name">{r.name}{r.id === selfId ? " (you)" : ""}</span>
+                  <span className="speed">{stale ? `${r.ageSec}s ago` : `${(r.speed * 3.6).toFixed(1)} km/h`}</span>
+                </li>
+              );
+            })}
           </ol>
         )}
       </section>

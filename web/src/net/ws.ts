@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { wsBase } from "./config";
+import { riderId } from "./identity";
 import { useRideStore } from "../store/ride";
 import type { LocMsg, ServerMsg } from "../types";
 
@@ -20,7 +21,7 @@ export function useRideSocket(): { sendLoc: (lat: number, lng: number, heading: 
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const connect = () => {
-      const url = `${wsBase}/ws?ride=${encodeURIComponent(code)}&name=${encodeURIComponent(name || "rider")}`;
+      const url = `${wsBase}/ws?ride=${encodeURIComponent(code)}&name=${encodeURIComponent(name || "rider")}&rider=${encodeURIComponent(riderId())}`;
       useRideStore.getState().setStatus(retryRef.current === 0 ? "connecting" : "reconnecting");
 
       const ws = new WebSocket(url);
