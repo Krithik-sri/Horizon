@@ -19,8 +19,11 @@ Run every command **from the repo root** (`C:\Data\projects\Horizon`) unless a s
 `cd mobile`. Commands are written for **PowerShell on Windows** (your shell). After each
 numbered step there's a ✅ checkpoint — don't move on until it passes.
 
-**Current state:** the repo has only docs so far — there is no `mobile/` folder yet. Step 1
-creates it. (The backend lives in `backend/`; see `SETUP_BACKEND.md` when you get there.)
+**Current state:** `mobile/` exists as an untouched `create-expo-app` default template
+(expo-router layout) — none of the Horizon code below has been added yet, so step 1 is done
+and you start at step 2. The **v1 client is the PWA** (`SETUP_WEB.md`); pick this guide back
+up when Phase 4 (true background GPS, screen off) becomes real. (The backend lives in
+`backend/`; see `SETUP_BACKEND.md`.)
 
 **Windows note:** you can build and run the **Android** dev client locally. For **iOS** you'll
 use **EAS cloud builds** (no Mac required for the build itself; a real iPhone still needs a
@@ -204,14 +207,16 @@ registerGlobals(); // required for LiveKit/WebRTC
 
 ```ts
 // src/core/wsClient.ts
-export function connectRide(code: string, name: string, onState: (s: any) => void) {
+export function connectRide(code: string, name: string, riderId: string, onState: (s: any) => void) {
   // Android emulator → host machine is 10.0.2.2; iOS sim → localhost;
   // physical device → your computer's LAN IP (e.g. 192.168.1.20)
-  const url = `ws://10.0.2.2:8080/ws?ride=${code}&name=${encodeURIComponent(name)}`;
+  // riderId: a stable per-install id (e.g. UUID in AsyncStorage) — presenting the same
+  // id on reconnect makes the server replace the old connection instead of adding a ghost.
+  const url = `ws://10.0.2.2:8080/ws?ride=${code}&name=${encodeURIComponent(name)}&rider=${encodeURIComponent(riderId)}`;
   const ws = new WebSocket(url);
 
   ws.onmessage = (e) => onState(JSON.parse(e.data));
-  ws.onclose = () => setTimeout(() => connectRide(code, name, onState), 1500); // naive backoff
+  ws.onclose = () => setTimeout(() => connectRide(code, name, riderId, onState), 1500); // naive backoff
 
   const sendLoc = (lat: number, lng: number) =>
     ws.readyState === WebSocket.OPEN &&

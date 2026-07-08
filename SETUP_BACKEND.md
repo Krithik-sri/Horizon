@@ -268,6 +268,7 @@ type riderState struct {
 	Lat       float64 `json:"lat"`
 	Lng       float64 `json:"lng"`
 	Speed     float64 `json:"speed"`
+	AgeSec    int     `json:"ageSec"` // seconds since this rider's last fix (server clock)
 	Pos       int     `json:"pos"`
 	DistAlong float64 `json:"distAlong"`
 }
@@ -304,6 +305,12 @@ func (r *Room) run() {
 		select {
 		case c := <-r.register:
 			r.mu.Lock()
+			// Rejoin policy: c.id is stable across reconnects (hub.go), so a client
+			// already seated with the same id is a zombie connection from before a
+			// network drop. Kick it here (delete + close(send), like unregister) and
+			// optionally carry its last fix over to c — otherwise a reconnecting
+			// rider appears twice for up to ~60s (pongWait). See room.go for the
+			// current state of this policy.
 			r.rider[c] = true
 			r.mu.Unlock()
 		case c := <-r.unregister:
@@ -320,6 +327,7 @@ func (r *Room) run() {
 }
 
 func (r *Room) broadcast() {
+	now := time.Now()
 	r.mu.RLock()
 	riders := make([]riderState, 0, len(r.rider))
 	hasRoute := len(r.route) > 1
@@ -327,7 +335,8 @@ func (r *Room) broadcast() {
 		if c.lastSeen.IsZero() {
 			continue // hasn't sent a fix yet — don't draw a dot at (0,0)
 		}
-		rs := riderState{ID: c.id, Name: c.name, Lat: c.lat, Lng: c.lng, Speed: c.speed}
+		rs := riderState{ID: c.id, Name: c.name, Lat: c.lat, Lng: c.lng, Speed: c.speed,
+			AgeSec: int(now.Sub(c.lastSeen).Seconds())}
 		if hasRoute {
 			rs.DistAlong = standings.DistAlongRoute(r.route, standings.Pt{Lat: c.lat, Lng: c.lng})
 		}
@@ -364,12 +373,15 @@ func (r *Room) broadcast() {
 
 ## 5. The hub — `backend/internal/hub/hub.go`
 
-Owns the room map and upgrades incoming `/ws` requests.
+Owns the room map and upgrades incoming `/ws` requests. Each new client is greeted with a
+one-time `welcome` message carrying its id (so it can pick its own dot out of `state`), and
+may present a stable `?rider=` id so a reconnect replaces its old connection.
 
 ```go
 package hub
 
 import (
+	"encoding/json"
 	"math/rand"
 	"net/http"
 	"sync"
@@ -424,6 +436,14 @@ func (h *Hub) ServeWS(w http.ResponseWriter, req *http.Request) {
 		name = "rider"
 	}
 
+	// Optional stable rider id, kept by the client across reconnects (mobile networks
+	// drop — CLAUDE.md). Presenting the same id lets the room replace the stale
+	// connection instead of seating a duplicate "ghost" rider. Absent/invalid → minted.
+	id := req.URL.Query().Get("rider")
+	if !validRiderID(id) {
+		id = genID()
+	}
+
 	conn, err := upgrader.Upgrade(w, req, nil)
 	if err != nil {
 		return // upgrader already wrote the HTTP error
@@ -434,9 +454,17 @@ func (h *Hub) ServeWS(w http.ResponseWriter, req *http.Request) {
 		room: room,
 		conn: conn,
 		send: make(chan []byte, 16),
-		id:   genID(),
+		id:   id,
 		name: name,
 	}
+
+	// Tell the client its server-assigned id so it can pick its own dot out of the
+	// broadcast `state`. Additive to the contract; clients may ignore it. The send
+	// channel is buffered, so queuing this before the write pump starts can't block.
+	if hello, err := json.Marshal(map[string]string{"type": "welcome", "id": c.id}); err == nil {
+		c.send <- hello
+	}
+
 	room.register <- c
 	go c.writePump()
 	go c.readPump()
@@ -462,6 +490,23 @@ func genID() string {
 		b[i] = hex[rand.Intn(16)]
 	}
 	return string(b)
+}
+
+// validRiderID accepts client-supplied ids shaped like crypto.randomUUID() output:
+// 8–64 chars of [A-Za-z0-9_-]. Anything else falls back to a server-minted id.
+func validRiderID(s string) bool {
+	if len(s) < 8 || len(s) > 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 ```
 
@@ -586,13 +631,24 @@ Invoke-RestMethod -Method Post http://localhost:8080/rides      # -> code : ABC1
 Node 24 ships a global `WebSocket`, so no install needed. Create `backend\wstest.mjs`:
 
 ```js
+// Phase 0 smoke test: open the WS, send one loc, expect a `welcome` then a `state`
+// broadcast echoing our fix. Delete or keep as a smoke test.
 const ws = new WebSocket("ws://localhost:8080/ws?ride=TEST01&name=tester");
+let gotWelcome = false;
+let gotState = false;
 ws.onopen = () => {
   console.log("connected");
-  ws.send(JSON.stringify({ type: "loc", lat: 12.9716, lng: 77.5946, ts: Math.floor(Date.now() / 1000) }));
+  ws.send(JSON.stringify({ type: "loc", lat: 12.9716, lng: 77.5946, heading: 45, speed: 6.2, ts: Math.floor(Date.now() / 1000) }));
 };
-ws.onmessage = (e) => console.log("state:", e.data);
-setTimeout(() => process.exit(0), 1500);
+ws.onmessage = (e) => {
+  const msg = JSON.parse(e.data);
+  if (msg.type === "welcome") { gotWelcome = true; console.log("welcome id:", msg.id); }
+  if (msg.type === "state") { gotState = true; console.log("state:", e.data); }
+};
+setTimeout(() => {
+  console.log(gotWelcome && gotState ? "PASS: welcome + state received" : `FAIL: welcome=${gotWelcome} state=${gotState}`);
+  process.exit(gotWelcome && gotState ? 0 : 1);
+}, 1500);
 ```
 
 Run it (server still running in the other window):
@@ -601,11 +657,13 @@ Run it (server still running in the other window):
 node backend\wstest.mjs
 ```
 
-✅ **Checkpoint:** within ~250 ms you see a line like:
-`state: {"type":"state","ride":"TEST01","riders":[{"id":"...","name":"tester","lat":12.9716,"lng":77.5946,"speed":0,"pos":1,"distAlong":0}]}`
+✅ **Checkpoint:** a `welcome id: …` line immediately, then within ~250 ms a line like:
+`state: {"type":"state","ride":"TEST01","riders":[{"id":"...","name":"tester","lat":12.9716,"lng":77.5946,"speed":6.2,"ageSec":0,"pos":1,"distAlong":0}]}`
+and finally `PASS: welcome + state received`.
 
 That's the whole spine working: a `loc` went up, the hub stamped and stored it, and the tick
-broadcast the combined `state` back. Delete `wstest.mjs` when done (or keep it as a smoke test).
+broadcast the combined `state` back — plus the one-time `welcome` that tells a client which
+rider it is.
 
 ---
 
@@ -623,10 +681,16 @@ You don't need this for development, but here's the plan (chosen because the bac
 Go, and Cloudflare's free realtime primitive — Durable Objects — is TypeScript-only):
 
 1. Run the single `server.exe` (or a Linux build: `GOOS=linux GOARCH=amd64 go build -o server .`)
-   on any free host — a free VM (Oracle Always-Free), Fly.io, Koyeb, or even your own machine.
-2. Put **Cloudflare Tunnel** (`cloudflared`) in front of it. The tunnel gives you a stable
-   hostname, automatic TLS, and `wss://` — no open inbound ports, no card, no Cloudflare paid
-   plan. The app then connects to `wss://your-name.example.com/ws?...`.
+   on a host that's free **without a card**: Koyeb's free instance, or simply your own machine.
+   (Check the fine print elsewhere — Oracle "Always-Free" and Fly.io both want a card at signup
+   for verification, and Render's free web services spin down on idle, which kills WebSockets.)
+2. Put **Cloudflare Tunnel** (`cloudflared`) in front of it for TLS/`wss://` with no open
+   inbound ports. Two flavours:
+   - **Quick tunnel** (`cloudflared tunnel --url http://localhost:8080`) — zero signup, no card,
+     but the `*.trycloudflare.com` URL is random and changes on every restart. Fine for a friend
+     group that re-shares a link.
+   - **Named tunnel** — stable hostname, but requires a domain you own added to Cloudflare
+     (domains cost ~$10/yr; this is the one place "no card" bends if you want a fixed URL).
 3. Tighten `upgrader.CheckOrigin` (step 5) to your real origin before going public, and switch
    the client from `ws://` to `wss://`.
 
@@ -644,5 +708,7 @@ deploy — you just wrap it.
 ### What's deliberately deferred
 - **`POST /rides/{code}/route`** — ORS cycling proxy + storing the polyline on the room (Phase 2).
 - **`POST /rides/{code}/voice-token`** — LiveKit JWT minting (Phase 3).
+- **Rejoin replace policy** — the stable `rider` id is plumbed through, but the room's
+  `register` case must still kick the zombie connection (marked `TODO(rejoin)` in `room.go`).
 - **Windowed standings projection**, **empty-room GC**, **join-code validation/expiry**, and
   **`wss://` + origin checks** — noted inline above; add as you harden past Phase 1.

@@ -182,11 +182,16 @@ type Client struct {
 }
 ```
 Flow per ride:
-1. Rider connects → added to the room for their join code.
-2. Rider sends `loc` messages on a loop.
-3. On each `loc`, the server updates that rider's position, recomputes standings (§7), and
-   broadcasts a `state` message to every client in the room.
-4. On disconnect, the rider is removed and the rest are notified.
+1. Rider connects (presenting a stable per-session `rider` id) → seated in the room for their
+   join code, **replacing** any previous connection with the same id (so a reconnect after a
+   dead zone doesn't leave a ghost rider). The server answers with `welcome` + the rider's id.
+2. Rider sends `loc` messages on a loop; the server stamps each fix with its own receive time
+   (don't trust the phone's clock).
+3. A fixed **~4 Hz tick** recomputes standings (§7) and broadcasts a `state` message to every
+   client in the room — fan-out is decoupled from ingest (§8).
+4. On disconnect, the rider is removed. A rider who merely goes silent (tunnel) is still
+   broadcast with a growing `ageSec` so clients can grey them out instead of showing a
+   confidently frozen dot.
 
 Endpoints:
 - `GET  /ws`               — the WebSocket (location in/out).
@@ -218,14 +223,19 @@ All WebSocket messages are JSON with a `type` discriminator.
 { "type": "loc", "lat": 12.9716, "lng": 77.5946, "heading": 45, "speed": 6.2, "ts": 1718700000 }
 ```
 
-**Server → all clients in room (on each update):**
+**Server → one client (once, on connect)** — its id, so it can pick its own dot out of `state`:
+```json
+{ "type": "welcome", "id": "a1" }
+```
+
+**Server → all clients in room (fixed ~4 Hz tick):**
 ```json
 {
   "type": "state",
   "ride": "ABC123",
   "riders": [
-    { "id": "a1", "name": "Sam", "lat": 12.972, "lng": 77.595, "speed": 6.2, "pos": 1, "distAlong": 4120 },
-    { "id": "b2", "name": "Raj", "lat": 12.961, "lng": 77.583, "speed": 5.1, "pos": 2, "distAlong": 3880 }
+    { "id": "a1", "name": "Sam", "lat": 12.972, "lng": 77.595, "speed": 6.2, "ageSec": 0, "pos": 1, "distAlong": 4120 },
+    { "id": "b2", "name": "Raj", "lat": 12.961, "lng": 77.583, "speed": 5.1, "ageSec": 14, "pos": 2, "distAlong": 3880 }
   ]
 }
 ```
@@ -237,8 +247,11 @@ POST /rides/ABC123/route    { "waypoints": [[12.97,77.59], ...] } -> { "polyline
 ```
 
 Field notes: `distAlong` = metres travelled along the planned route; `pos` = 1-based race
-position; `ts` = client unix seconds (for staleness detection — grey out a rider whose last
-fix is older than ~10 s).
+position; `ts` = client unix seconds (informational — the server stamps fixes with its own
+receive time); `ageSec` = seconds since that rider's last fix, computed by the server — grey
+out a rider past ~10 s. Clients pass a stable per-session `rider` id on
+`GET /ws?ride=…&name=…&rider=…` so a reconnect **replaces** the old connection instead of
+adding a ghost; if absent the server mints one (the `welcome` id either way).
 
 ---
 
@@ -287,6 +300,12 @@ destination, or by total distance covered from each rider's own start point.
 - **Server-side standings & route proxy over client-side:** the server already holds all coordinates, so compute standings once and broadcast; routing goes through the server so the ORS key stays secret and the shared quota is controlled.
 - **Anonymous join codes over accounts:** removes an entire auth subsystem from v1.
 - **Throttled fixed-rate updates (~1 Hz):** simple and predictable; adaptive rates can come later.
+- **Fixed-tick fan-out (~4 Hz) over broadcast-per-`loc`:** ingest and fan-out are decoupled —
+  N riders at 1 Hz produce a constant message rate per client instead of N×, and burst arrivals
+  don't amplify. Cost: up to 250 ms of added latency, irrelevant at bike speeds.
+- **Stable client-held rider ids over per-connection ids:** the client presents the same id on
+  reconnect so the room replaces the zombie connection (no duplicate dot after a dead zone).
+  It's a bearer identity — same trust model as the join code itself; real auth is the §9 path.
 
 ---
 

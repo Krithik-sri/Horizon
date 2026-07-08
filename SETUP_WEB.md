@@ -90,19 +90,27 @@ or put a trusted tunnel in front of `npm run preview`. Then:
 
 ```
 web/src/
-  types.ts            # the WebSocket contract (loc / state / welcome) — lat/lng wire format
+  types.ts            # the WebSocket contract (loc / state / welcome) + STALE_AFTER_SEC — lat/lng wire format
   store/ride.ts       # zustand: name, ride code, selfId, status, riders
   net/config.ts       # where the backend lives (dev :8080 vs same-origin prod)
   net/api.ts          # POST /rides
-  net/ws.ts           # useRideSocket: WS + reconnect/backoff, routes welcome/state → store, sendLoc()
+  net/identity.ts     # stable per-tab rider id (sessionStorage) — reconnects replace, not duplicate
+  net/ws.ts           # useRideSocket: WS + reconnect/backoff (+ ?rider= id), routes welcome/state → store, sendLoc()
   location/useGeo.ts  # watchPosition throttled to ~1 Hz
   location/useWakeLock.ts  # keep screen awake; re-acquire on visibilitychange
-  map/Map.tsx         # MapLibre GL JS + OpenFreeMap; one marker per rider. [lng,lat] conversion lives here.
+  map/Map.tsx         # MapLibre GL JS + OpenFreeMap; one marker per rider (greyed when stale). [lng,lat] conversion lives here.
   App.tsx / Ride.tsx  # lobby (name + create/join) and the riding view (map + standings)
 ```
 
 The `[lng, lat]` vs `lat/lng` trap (CLAUDE.md): the wire format is `lat`/`lng`; MapLibre wants
 `[lng, lat]`. The only conversion is in `map/Map.tsx` where markers are placed.
+
+**Dead zones:** the server includes `ageSec` (seconds since a rider's last fix) in every
+`state`. Past `STALE_AFTER_SEC` (10 s, `types.ts`) the map dot greys out and the standings row
+shows "Ns ago" instead of a confidently frozen speed. On reconnect the client presents the same
+`rider` id (`net/identity.ts` — sessionStorage on purpose: it survives a reload, but two tabs
+get *different* ids, so the two-tab test below still works), letting the server replace the
+zombie connection instead of seating a ghost.
 
 ### Data flow (one GPS fix, end to end)
 

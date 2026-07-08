@@ -90,11 +90,15 @@ Server → one client, once on connect (so it can pick its own dot out of `state
 ```json
 { "type": "welcome", "id": "a1" }
 ```
-Server → all clients in room, on each update:
+Server → all clients in room, on a fixed ~4 Hz tick (fan-out is decoupled from ingest):
 ```json
 { "type": "state", "ride": "ABC123",
-  "riders": [ { "id": "a1", "name": "Sam", "lat": 12.97, "lng": 77.59, "speed": 6.2, "pos": 1, "distAlong": 4120 } ] }
+  "riders": [ { "id": "a1", "name": "Sam", "lat": 12.97, "lng": 77.59, "speed": 6.2, "ageSec": 0, "pos": 1, "distAlong": 4120 } ] }
 ```
+`ageSec` = seconds since that rider's last fix (server clock); clients grey a rider out past
+~10 s. Clients should pass a stable per-session `rider` id on connect
+(`GET /ws?ride=…&name=…&rider=…`) so a reconnect replaces the old connection instead of
+adding a ghost rider; if it's absent the server mints one (the `welcome` id either way).
 HTTP: `POST /rides` (→ join code) · `POST /rides/{code}/route` (ORS proxy → polyline) ·
 `POST /rides/{code}/voice-token` (→ LiveKit JWT + url) · `GET /ws` · `GET /healthz`.
 
