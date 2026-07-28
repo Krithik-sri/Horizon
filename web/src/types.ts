@@ -1,4 +1,4 @@
-// The WebSocket contract (CLAUDE.md "WebSocket protocol" / SYSTEM_DESIGN.md §6).
+// The WebSocket contract (CLAUDE.md "WebSocket protocol" / docs/SYSTEM_DESIGN.md §6).
 // Internal messages use lat/lng. MapLibre + GeoJSON use [lng, lat] — we convert at the
 // map boundary (see map/Map.tsx), never here.
 
@@ -12,7 +12,7 @@ export interface LocMsg {
   ts: number; // unix seconds
 }
 
-// Grey a rider out once their last fix is older than this (SYSTEM_DESIGN.md §6).
+// Grey a rider out once their last fix is older than this (docs/SYSTEM_DESIGN.md §6).
 export const STALE_AFTER_SEC = 10;
 
 // One rider in the server → clients broadcast.

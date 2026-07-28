@@ -1,5 +1,5 @@
 // Phase 0 smoke test: open the WS, send one loc, expect a `welcome` then a `state`
-// broadcast echoing our fix (SETUP_BACKEND.md §10). Delete or keep as a smoke test.
+// broadcast echoing our fix (docs/SETUP_BACKEND.md §10). Delete or keep as a smoke test.
 const ws = new WebSocket("ws://localhost:8080/ws?ride=TEST01&name=tester");
 let gotWelcome = false;
 let gotState = false;

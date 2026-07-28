@@ -1,7 +1,8 @@
 # CLAUDE.md
 
-Context for working in this repo. Keep edits aligned with these rules. For full rationale see
-`SYSTEM_DESIGN.md`; for setup steps see `SETUP_BACKEND.md` / `SETUP_MOBILE.md`.
+Context for working in this repo. Keep edits aligned with these rules. Every document except this
+one and `README.md` lives in `docs/` — for full rationale see `docs/SYSTEM_DESIGN.md`; for setup
+steps see `docs/SETUP_BACKEND.md` / `docs/SETUP_MOBILE.md`.
 
 ## What this is
 
@@ -30,15 +31,17 @@ Everything is a view on one thing: each rider's live coordinates flowing through
 
 ```
 backend/   Go realtime server (WebSocket hub, standings, LiveKit token, ORS route proxy)
-web/       Installable PWA (Vite + React + TypeScript) — the v1 client (see SETUP_WEB.md)
+web/       Installable PWA (Vite + React + TypeScript) — the v1 client (see docs/SETUP_WEB.md)
 mobile/    React Native (Expo) app, TypeScript — future native path (Phase 4 background GPS)
-SYSTEM_DESIGN.md   architecture + decisions (source of truth)
-SETUP_BACKEND.md   Go setup
-SETUP_WEB.md       PWA setup
-SETUP_MOBILE.md    Expo setup
+docs/      all project documentation (index: docs/README.md)
+docs/SYSTEM_DESIGN.md   architecture + decisions (source of truth)
+docs/SETUP_BACKEND.md   Go setup
+docs/SETUP_WEB.md       PWA setup
+docs/SETUP_MOBILE.md    Expo setup
+docs/ADR/               architecture decision records
 ```
 
-**Client is PWA-first** (`SYSTEM_DESIGN.md §1` "Client decision"). Riders mount the phone screen-on,
+**Client is PWA-first** (`docs/SYSTEM_DESIGN.md §1` "Client decision"). Riders mount the phone screen-on,
 so the `web/` PWA with a screen wake-lock covers v1; the React Native `mobile/` app stays the path
 for true background location. The Go backend is identical for both clients. Web equivalents of the
 native deps: MapLibre **GL JS** (`maplibre-gl`), LiveKit **JS** SDK, `navigator.geolocation` +
@@ -47,7 +50,7 @@ native deps: MapLibre **GL JS** (`maplibre-gl`), LiveKit **JS** SDK, `navigator.
 ## Status
 
 Early scaffolding. The directory layout above is the **target**; not all code exists yet.
-Build in this order (see `SYSTEM_DESIGN.md §11`):
+Build in this order (see `docs/SYSTEM_DESIGN.md §11`):
 0. Map shows own dot; server echoes WS. 1. Two phones see each other (core pipe).
 2. Route + standings. 3. Voice. 4. Background location + reconnect.
 Prefer completing the current phase over adding later-phase features.
@@ -111,7 +114,7 @@ HTTP: `POST /rides` (→ join code) · `POST /rides/{code}/route` (ORS proxy →
   **MapLibre and GeoJSON use `[lng, lat]`.** Convert at the boundary; keep the convention
   explicit wherever you build markers or route lines.
 - **Standings logic lives in the Go server**, not the client — it already has all coordinates.
-  Project each rider onto the route polyline and sort by distance-along-route (`SYSTEM_DESIGN.md §7`).
+  Project each rider onto the route polyline and sort by distance-along-route (`docs/SYSTEM_DESIGN.md §7`).
 - **Mobile is a custom Expo dev client, NOT Expo Go.** MapLibre + LiveKit need native code.
   Adding/upgrading a native package requires rebuilding the dev client; JS changes hot-reload.
 - **Go:** standard library first; keep packages under `internal/`; gofmt + vet clean.

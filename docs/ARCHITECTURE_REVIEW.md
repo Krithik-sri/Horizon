@@ -11,12 +11,12 @@
 | **Reviewed** | 2026-07-27 |
 | **Repo** | `E:\Project Horizon\Horizon` (git, branch `main`, clean tree) |
 | **Commit** | `1cf6f43` — *fix: ghost users* |
-| **Scope** | `CLAUDE.md`, `SYSTEM_DESIGN.md`, `README.md`, `SETUP_*.md`, `backend/`, `web/`, `mobile/` |
+| **Scope** | `CLAUDE.md`, `docs/SYSTEM_DESIGN.md`, `README.md`, `SETUP_*.md`, `backend/`, `web/`, `mobile/` |
 | **Target scale** | ≤15 riders per ride, friend-group hobby app |
 | **Hard constraint** | Zero paid services, no credit card (`CLAUDE.md` §"What this is") |
 
-**Related documents:** [`SYSTEM_DESIGN.md`](./SYSTEM_DESIGN.md) is the source of truth for *why*;
-[`CLAUDE.md`](./CLAUDE.md) holds the enforceable rules; the `SETUP_*.md` files hold setup steps.
+**Related documents:** [`docs/SYSTEM_DESIGN.md`](./SYSTEM_DESIGN.md) is the source of truth for *why*;
+[`CLAUDE.md`](../CLAUDE.md) holds the enforceable rules; the `SETUP_*.md` files hold setup steps.
 This document describes the system *as built* and is subordinate to those where they disagree —
 except where it explicitly notes that they have drifted apart.
 
@@ -42,7 +42,7 @@ except where it explicitly notes that they have drifted apart.
 
 ## 1.1 The spine
 
-The whole system is one idea, stated in `SYSTEM_DESIGN.md:61`: **every feature is a view on one
+The whole system is one idea, stated in `docs/SYSTEM_DESIGN.md:61`: **every feature is a view on one
 data stream — each rider's live coordinates flowing through the Go server.** Map dots, standings,
 and (later) voice-room membership are all projections of that single pipe.
 
@@ -157,8 +157,8 @@ A's device GPS
 **Key properties of this path:**
 
 - **No direct A→B path.** All state passes through the room's shared mutable rider set. A never learns of B except via a `state` frame.
-- **Latency budget:** up to 1000 ms client throttle + ≤250 ms tick + 2× network RTT. At bike speeds (~20 km/h ≈ 5.5 m/s) the worst case ≈ 7 m of positional error, which `SYSTEM_DESIGN.md:305` correctly calls irrelevant.
-- **Message rate is O(1) per client, not O(N).** N riders at 1 Hz produce exactly 4 frames/s to each client regardless of N — this is the central scaling decision (`SYSTEM_DESIGN.md:303`).
+- **Latency budget:** up to 1000 ms client throttle + ≤250 ms tick + 2× network RTT. At bike speeds (~20 km/h ≈ 5.5 m/s) the worst case ≈ 7 m of positional error, which `docs/SYSTEM_DESIGN.md:305` correctly calls irrelevant.
+- **Message rate is O(1) per client, not O(N).** N riders at 1 Hz produce exactly 4 frames/s to each client regardless of N — this is the central scaling decision (`docs/SYSTEM_DESIGN.md:303`).
 - **Every rider's own dot is a round-trip.** A's dot on A's own screen comes back from the server; there is no local echo. If the server is down, you don't see yourself. This is why `welcome`/`selfId` exists.
 - **Lossy by design.** Both the throttle and the full-queue drop discard data silently. There is no sequence number, no ack, no replay.
 
@@ -308,7 +308,7 @@ one. Both are harmless.
 |---|---|---|---|
 | `GET` | `/healthz` | inline (`main.go:16`) | ✅ returns `ok`. Liveness only, no readiness/dependency check. |
 | `GET` | `/ws` | `h.ServeWS` | ✅ the spine. |
-| `POST` | `/rides` | inline (`main.go:23`) | ⚠️ mints a code. **Request body is entirely ignored** — `SYSTEM_DESIGN.md:245` specifies `{"name":"Sunday loop"}`; that field is dropped. **No `Access-Control-Allow-Origin` header.** |
+| `POST` | `/rides` | inline (`main.go:23`) | ⚠️ mints a code. **Request body is entirely ignored** — `docs/SYSTEM_DESIGN.md:245` specifies `{"name":"Sunday loop"}`; that field is dropped. **No `Access-Control-Allow-Origin` header.** |
 | `POST` | `/rides/{code}/route` | `notImplemented` | ❌ `501` |
 | `POST` | `/rides/{code}/voice-token` | `notImplemented` | ❌ `501` |
 
@@ -372,8 +372,8 @@ renders it faithfully, which makes it look functional while being semantically m
 
 ## 2.12 Scalability concerns
 
-- **Single process, no horizontal path.** All state is in-memory; two instances share nothing. `SYSTEM_DESIGN.md:318` names Redis Pub/Sub as the escape hatch. This is a deliberate, documented v1 choice — not accidental debt.
-- **Process restart = total state loss.** Acceptable per `SYSTEM_DESIGN.md:299` (clients reconnect and repopulate within seconds) — but note that clients repopulate only their *position*; a ride's route would be lost with no way to recover it, since routes aren't persisted and the client doesn't re-POST.
+- **Single process, no horizontal path.** All state is in-memory; two instances share nothing. `docs/SYSTEM_DESIGN.md:318` names Redis Pub/Sub as the escape hatch. This is a deliberate, documented v1 choice — not accidental debt.
+- **Process restart = total state loss.** Acceptable per `docs/SYSTEM_DESIGN.md:299` (clients reconnect and repopulate within seconds) — but note that clients repopulate only their *position*; a ride's route would be lost with no way to recover it, since routes aren't persisted and the client doesn't re-POST.
 - **Room goroutine leak** is the first thing that will actually bite in a long-running deployment.
 - **Broadcast is O(R) per tick and marshals once** — good. But it marshals the *same* payload for everyone, meaning there's no per-client filtering (viewport culling, etc.). Fine at 15; irrelevant beyond.
 - **`distAlong` is O(R·S) per tick** — the real CPU cliff, and it lands the moment Phase 2 ships.
@@ -545,14 +545,14 @@ Via `vite-plugin-pwa` ^1.0 (`vite.config.ts:9`), default Workbox `generateSW` st
 positives. It is the stock `create-expo-app` default template with Horizon's *native dependencies
 pre-installed and configured*.
 
-Confirmed by `SETUP_MOBILE.md:22-26`: *"`mobile/` exists as an untouched `create-expo-app` default
+Confirmed by `docs/SETUP_MOBILE.md:22-26`: *"`mobile/` exists as an untouched `create-expo-app` default
 template… none of the Horizon code below has been added yet."*
 
 ## 4.2 What already exists
 
 **Configured and correct:**
 
-- `app.config.ts` — Horizon identity (`com.krithik.horizon`), iOS `UIBackgroundModes: ["location","audio"]`, `NSMicrophoneUsageDescription`, and a plugin list covering `expo-dev-client`, MapLibre, `expo-location` (with `isAndroidBackgroundLocationEnabled` + `isAndroidForegroundServiceEnabled`), the LiveKit Expo plugin with `audioType: "communication"`, and `@config-plugins/react-native-webrtc`. **The hard part — the native permissions/background config that `SYSTEM_DESIGN.md:328` warns will eat real time — is already written.**
+- `app.config.ts` — Horizon identity (`com.krithik.horizon`), iOS `UIBackgroundModes: ["location","audio"]`, `NSMicrophoneUsageDescription`, and a plugin list covering `expo-dev-client`, MapLibre, `expo-location` (with `isAndroidBackgroundLocationEnabled` + `isAndroidForegroundServiceEnabled`), the LiveKit Expo plugin with `audioType: "communication"`, and `@config-plugins/react-native-webrtc`. **The hard part — the native permissions/background config that `docs/SYSTEM_DESIGN.md:328` warns will eat real time — is already written.**
 - `eas.json` — `development` (dev client, internal), `preview` (internal), `production` (autoIncrement) profiles.
 - **Native deps installed:** `@maplibre/maplibre-react-native` ^11.3.4, `@livekit/react-native` ^2.11.1 + `@livekit/react-native-webrtc` ^144.1.1 + expo plugin + `livekit-client` ^2.19.2, `zustand` ^5.0.14. React Native 0.85.3, Expo ~56, React 19.2.3, expo-router ~56.2, reanimated 4.3.1.
 - `tsconfig.json` — strict, with `@/*` → `./src/*` and `@/assets/*` path aliases.
@@ -566,16 +566,16 @@ web-badge, external-link), `src/constants/theme.ts`, `src/hooks/`, plus template
 
 **Two concrete defects in the current config:**
 
-1. **`expo-location` is listed as a plugin in `app.config.ts:19` but is NOT in `package.json` dependencies.** Neither is `expo-task-manager`. `SETUP_MOBILE.md:90` instructs installing both; that step was skipped while step 4 (the config) was completed. `npx expo config` / `prebuild` / `eas build` will fail to resolve the `expo-location` plugin. This must be fixed before any native build succeeds.
-2. **`app.config.ts` has no `scheme`.** The original `app.json` was deleted (`SETUP_MOBILE.md:124`) and replaced with a minimal config that omits `scheme`, `version`, `orientation`, `icon`, `splash`, and `userInterfaceStyle`. `expo-router` + `expo-dev-client` need a `scheme` for deep linking, and the template's `assets/images/icon.png` / `splash-icon.png` are now orphaned.
+1. **`expo-location` is listed as a plugin in `app.config.ts:19` but is NOT in `package.json` dependencies.** Neither is `expo-task-manager`. `docs/SETUP_MOBILE.md:90` instructs installing both; that step was skipped while step 4 (the config) was completed. `npx expo config` / `prebuild` / `eas build` will fail to resolve the `expo-location` plugin. This must be fixed before any native build succeeds.
+2. **`app.config.ts` has no `scheme`.** The original `app.json` was deleted (`docs/SETUP_MOBILE.md:124`) and replaced with a minimal config that omits `scheme`, `version`, `orientation`, `icon`, `splash`, and `userInterfaceStyle`. `expo-router` + `expo-dev-client` need a `scheme` for deep linking, and the template's `assets/images/icon.png` / `splash-icon.png` are now orphaned.
 
-Also absent: any call to LiveKit's `registerGlobals()` (required per `SETUP_MOBILE.md:200`), and no
-AsyncStorage/SecureStore dependency for the stable per-install rider id that `SETUP_MOBILE.md:213`
+Also absent: any call to LiveKit's `registerGlobals()` (required per `docs/SETUP_MOBILE.md:200`), and no
+AsyncStorage/SecureStore dependency for the stable per-install rider id that `docs/SETUP_MOBILE.md:213`
 calls for.
 
 ## 4.3 Future architecture
 
-Per `SYSTEM_DESIGN.md:144-157` and `SETUP_MOBILE.md:344-357`:
+Per `docs/SYSTEM_DESIGN.md:144-157` and `docs/SETUP_MOBILE.md:344-357`:
 
 ```
 mobile/
@@ -596,7 +596,7 @@ Note this proposed layout **differs from the web client's actual layout** (`web/
 and, given it works, arguably the better template for the native app to copy. Deciding this now
 avoids two divergent conventions.
 
-**The single reason the native app exists** is true background location — `SETUP_WEB.md:176` is
+**The single reason the native app exists** is true background location — `docs/SETUP_WEB.md:176` is
 explicit that no service-worker trick makes a browser keep `geolocation` alive with the screen off.
 Everything else in the native app is a re-implementation of working web code. The
 `UIBackgroundModes` + Android foreground-service config in `app.config.ts` is precisely the payload
@@ -604,22 +604,22 @@ that justifies the whole directory.
 
 ## 4.4 Integration plan with the backend
 
-**The backend requires zero changes.** `SYSTEM_DESIGN.md:35` states this and the code bears it out:
+**The backend requires zero changes.** `docs/SYSTEM_DESIGN.md:35` states this and the code bears it out:
 `ServeWS` reads query params and speaks JSON; nothing is browser-specific. The protocol is
 identical.
 
 Sequenced integration:
 
 1. **Fix the config defects** — `npx expo install expo-location expo-task-manager`; add `scheme`, `version`, icon/splash to `app.config.ts`.
-2. **Build the dev client once** — `eas build --profile development --platform android` (Windows host ⇒ Android locally, iOS via EAS cloud per `SETUP_MOBILE.md:28`). Rebuild only when native deps change.
+2. **Build the dev client once** — `eas build --profile development --platform android` (Windows host ⇒ Android locally, iOS via EAS cloud per `docs/SETUP_MOBILE.md:28`). Rebuild only when native deps change.
 3. **Port the protocol types** — `web/src/types.ts` copies over verbatim. This file is the contract; it should ideally become shared rather than duplicated.
 4. **Port the store** — `web/src/store/ride.ts` is framework-agnostic zustand; it copies with no changes.
 5. **Port the socket layer** — `web/src/net/ws.ts` uses only the global `WebSocket`, which RN provides. The only change is the identity backend: swap `sessionStorage` (`net/identity.ts`) for AsyncStorage/SecureStore, and note the semantics shift from *per-tab* to *per-install*, which is actually what the server's rejoin logic wants.
-6. **Config/base URL** — replace `net/config.ts`'s `location.hostname` logic with `expo-constants` + the emulator rule (`10.0.2.2` for Android emulator, LAN IP for physical devices — `SETUP_BACKEND.md:672`).
+6. **Config/base URL** — replace `net/config.ts`'s `location.hostname` logic with `expo-constants` + the emulator rule (`10.0.2.2` for Android emulator, LAN IP for physical devices — `docs/SETUP_BACKEND.md:672`).
 7. **Location** — replace `useGeo`'s `watchPosition` with `Location.watchPositionAsync({accuracy: High, timeInterval: 1000, distanceInterval: 5})`. Note RN's `timeInterval` moves the 1 Hz throttle from JS into the OS, which is more battery-efficient than the web's approach.
 8. **Map** — replace `maplibre-gl` imperative markers with declarative `<MapView>/<Camera>/<PointAnnotation>`. Same `[lng, lat]` convention, same trap, different API shape.
 9. **Wake lock → drop it.** Replaced by real background modes.
-10. **Background task (the actual Phase 4 work)** — `TaskManager.defineTask` + `Location.startLocationUpdatesAsync` with a foreground-service notification. **Critical constraint:** a background task runs in a separate JS context from the UI; it cannot reuse the React-owned WebSocket. Either the socket must be owned outside React and reachable from the task, or fixes must be handed off via a queue. `SETUP_MOBILE.md:249` ("forward locations[0].coords up the WebSocket") glosses over this — it is the hardest unsolved design question in the mobile path.
+10. **Background task (the actual Phase 4 work)** — `TaskManager.defineTask` + `Location.startLocationUpdatesAsync` with a foreground-service notification. **Critical constraint:** a background task runs in a separate JS context from the UI; it cannot reuse the React-owned WebSocket. Either the socket must be owned outside React and reachable from the task, or fixes must be handed off via a queue. `docs/SETUP_MOBILE.md:249` ("forward locations[0].coords up the WebSocket") glosses over this — it is the hardest unsolved design question in the mobile path.
 11. **Voice (Phase 3)** — same `POST /rides/{code}/voice-token`, then `<LiveKitRoom audio={false}>` + PTT via `setMicrophoneEnabled`. Requires `AudioSession.startAudioSession()` and `registerGlobals()`.
 
 ---
@@ -741,7 +741,7 @@ Client                                          Server
 
 ## 5.6 Synchronization rules
 
-1. **The server clock is authoritative for freshness.** Client `ts` is informational only; `ageSec` derives from the server's receive time (`SYSTEM_DESIGN.md:250`). This makes staleness immune to phone clock skew.
+1. **The server clock is authoritative for freshness.** Client `ts` is informational only; `ageSec` derives from the server's receive time (`docs/SYSTEM_DESIGN.md:250`). This makes staleness immune to phone clock skew.
 2. **Ingest and fan-out are fully decoupled.** No `loc` triggers a broadcast; the ticker is unconditional. N riders at 1 Hz ⇒ 4 msg/s per client, independent of N.
 3. **Fan-out is best-effort.** Full queue ⇒ drop. Since every `state` is a complete snapshot, there is no ordering or gap-recovery requirement.
 4. **Stable rider ids are the reconnect key.** A client presents the same `?rider=` across reconnects so the room can replace rather than duplicate. **The server side of this rule is not implemented** (`room.go:58`), so the contract is currently client-honoured and server-ignored.
@@ -782,7 +782,7 @@ Legend: ✅ Completed · ⚠️ Partial · ❌ Missing · 🚫 Blocked
 | 21 | Join-code validation / expiry | ❌ Missing | Any string is a valid room |
 | 22 | Rate limiting / connection caps | ❌ Missing | — |
 | 23 | Structured logging | ❌ Missing | One startup line |
-| 24 | Metrics / observability | ❌ Missing | `SYSTEM_DESIGN.md:320` scaling path |
+| 24 | Metrics / observability | ❌ Missing | `docs/SYSTEM_DESIGN.md:320` scaling path |
 | 25 | Graceful shutdown, server timeouts | ❌ Missing | — |
 | 26 | Panic recovery middleware | ❌ Missing | One panic ends all rides |
 | 27 | Go unit tests | ❌ Missing | `standings` is pure and untested |
@@ -842,7 +842,7 @@ Legend: ✅ Completed · ⚠️ Partial · ❌ Missing · 🚫 Blocked
 | 78 | Dev-client build produced | ❌ Missing | Blocked on 71 |
 | **Cross-cutting** ||||
 | 79 | HTTPS / `wss://` deployment | ❌ Missing | Required for install, geolocation, wake lock, WebRTC |
-| 80 | Deployment (Koyeb + Cloudflare Tunnel) | ❌ Missing | Planned, `SETUP_BACKEND.md:678` |
+| 80 | Deployment (Koyeb + Cloudflare Tunnel) | ❌ Missing | Planned, `docs/SETUP_BACKEND.md:678` |
 | 81 | Two-phone real-world test | 🚫 Blocked | Blocked on 79 |
 | 82 | Auth / accounts | ❌ Missing | Deliberately out of scope (`CLAUDE.md:127`) |
 | 83 | Database / persistence | ❌ Missing | Deliberately out of scope |
@@ -870,7 +870,7 @@ job.
 **Why critical:** it breaks the primary entry point of the only working client. Joining still works
 (WebSocket handshakes are exempt from CORS — which is exactly why `CheckOrigin` exists), so the bug
 hides: you can test the whole pipe by typing an arbitrary code into "Join", because any string
-creates a room. Note that the documented workaround in `SETUP_WEB.md:62`
+creates a room. Note that the documented workaround in `docs/SETUP_WEB.md:62`
 (`VITE_BACKEND_HTTP=http://192.168.1.50:8080`) is *still cross-origin* and does not fix it. Two real
 fixes: add a CORS middleware in Go, or add `server.proxy` to `vite.config.ts`. It self-masks in
 production because `httpBase` becomes `location.origin` behind a single reverse proxy — which means
@@ -991,7 +991,7 @@ discarded. Either use them or remove them; as-is they mislead every future reade
 | L8 | `devOptions.enabled: true` for the service worker in dev invites stale-cache confusion. |
 | L9 | The 512 px icon serves as both `any` and `maskable`, but `gen-icons.mjs:33-46` draws to 87 % of the canvas — outside the maskable safe zone, so Android will crop it. |
 | L10 | Marker updates teleport rather than interpolate — visible 4 Hz jitter. |
-| L11 | `SETUP_BACKEND.md` and `SETUP_MOBILE.md` embed full copies of source files; they have already drifted (`SETUP_BACKEND.md:308-313` describes the rejoin TODO differently from `room.go:58-69`). |
+| L11 | `docs/SETUP_BACKEND.md` and `docs/SETUP_MOBILE.md` embed full copies of source files; they have already drifted (`docs/SETUP_BACKEND.md:308-313` describes the rejoin TODO differently from `room.go:58-69`). |
 | L12 | Setup docs reference `C:\Data\Projects\Horizon` while the repo lives at `E:\Project Horizon\Horizon`. |
 | L13 | Mobile template cruft (`explore.tsx`, `web-badge`, `animated-icon`, `hint-row`, `reset-project.js`, tutorial images) will need deleting. |
 | L14 | `broadcast()` marshals and sends `{"riders":[]}` to nobody 4×/sec for every empty room. |
@@ -1027,8 +1027,8 @@ discarded. Either use them or remove them; as-is they mislead every future reade
 |---|---|---|
 | R-S1 | High | `CheckOrigin` returns `true` for every request (`hub.go:25`) — classic cross-site WebSocket hijacking. Any page in a rider's browser can open a socket, join any ride, and read live locations of real people. |
 | R-S2 | High | **No authentication or authorization of any kind.** The join code is a bearer token, and it isn't even checked — arbitrary strings are accepted. `?name=` and `?rider=` are unverified client assertions, so anyone can impersonate any rider id. |
-| R-S3 | High | **`ws://` and `http://` in dev — location data in plaintext** over what will often be a coffee-shop network. `SYSTEM_DESIGN.md:366` mandates `wss://` in production; nothing enforces it, and `net/config.ts:15` will happily use `ws://` if the page is served over HTTP. |
-| R-S4 | High | Live location is the most sensitive data class in the app (`SYSTEM_DESIGN.md:72`) and it is broadcast to everyone in a room with no consent gate, no per-rider visibility control, and no way to go temporarily invisible. |
+| R-S3 | High | **`ws://` and `http://` in dev — location data in plaintext** over what will often be a coffee-shop network. `docs/SYSTEM_DESIGN.md:366` mandates `wss://` in production; nothing enforces it, and `net/config.ts:15` will happily use `ws://` if the page is served over HTTP. |
+| R-S4 | High | Live location is the most sensitive data class in the app (`docs/SYSTEM_DESIGN.md:72`) and it is broadcast to everyone in a room with no consent gate, no per-rider visibility control, and no way to go temporarily invisible. |
 | R-S5 | Medium | `math/rand` join codes are predictable given knowledge of the seeding, and the code space is enumerable at ~1 B with **no rate limiting**. |
 | R-S6 | Medium | No input bounds on `?name=` server-side. Harmless with React's escaping today; a future non-React renderer or log-injection path changes that. |
 | R-S7 | Medium | Phase 3's LiveKit token endpoint will mint room-join JWTs based purely on a claimed rider id and an unvalidated ride code — it inherits every weakness above, but now with a *cryptographically signed* credential to an external service. |
@@ -1038,7 +1038,7 @@ discarded. Either use them or remove them; as-is they mislead every future reade
 
 | ID | Sev | Risk |
 |---|---|---|
-| R-Sc1 | High (accepted) | Single process, in-memory state, no horizontal path. Documented as the deliberate v1 choice with Redis Pub/Sub as the escape hatch (`SYSTEM_DESIGN.md:318`). |
+| R-Sc1 | High (accepted) | Single process, in-memory state, no horizontal path. Documented as the deliberate v1 choice with Redis Pub/Sub as the escape hatch (`docs/SYSTEM_DESIGN.md:318`). |
 | R-Sc2 | High | Process restart destroys all rides. Riders' positions repopulate within seconds; **a route does not** — it's server-only state that no client re-POSTs. |
 | R-Sc3 | High | `distAlong` at O(riders × segments × 4 Hz) is the first genuine CPU wall. |
 | R-Sc4 | Medium | No caps anywhere: no max riders per room, no max rooms, no max connections, no message-rate limit. A client can send `loc` in a tight loop and each one takes the room-wide write lock. |
@@ -1052,8 +1052,8 @@ discarded. Either use them or remove them; as-is they mislead every future reade
 |---|---|---|
 | R-Mt1 | High | Three independent copies of the wire protocol (Go structs, `web/src/types.ts`, future mobile) with no shared schema and no conformance test. `heading` already drifted. |
 | R-Mt2 | High | No tests at all. Every change is verified by running the app by hand. |
-| R-Mt3 | Medium | Setup docs duplicate full source files verbatim and have already drifted from the code (`SETUP_BACKEND.md:308` vs `room.go:58`). Every backend edit needs a doc edit or the docs actively mislead. |
-| R-Mt4 | Medium | The web client's actual structure (`net/`, `location/`, `map/`, `store/`) differs from the `features/`-based layout prescribed for mobile in both `SYSTEM_DESIGN.md:144` and `SETUP_MOBILE.md:344`. Unresolved, this yields two conventions in one repo. |
+| R-Mt3 | Medium | Setup docs duplicate full source files verbatim and have already drifted from the code (`docs/SETUP_BACKEND.md:308` vs `room.go:58`). Every backend edit needs a doc edit or the docs actively mislead. |
+| R-Mt4 | Medium | The web client's actual structure (`net/`, `location/`, `map/`, `store/`) differs from the `features/`-based layout prescribed for mobile in both `docs/SYSTEM_DESIGN.md:144` and `docs/SETUP_MOBILE.md:344`. Unresolved, this yields two conventions in one repo. |
 | R-Mt5 | Medium | No ESLint/Prettier for TypeScript; no CI to enforce `go vet`, `tsc -b`, or formatting. |
 | R-Mt6 | Low | Domain logic (ranking) embedded in transport code (`broadcast`). |
 | R-Mt7 | Low | Committed `.tsbuildinfo` files add diff noise to every build. |
@@ -1074,9 +1074,9 @@ discarded. Either use them or remove them; as-is they mislead every future reade
 
 | ID | Sev | Risk |
 |---|---|---|
-| R-B1 | High | The PWA's core mechanism is *screen-on + continuous high-accuracy GPS*, which `SYSTEM_DESIGN.md:330` names as a known heavy drain. A long ride on a mounted phone will need external power. |
+| R-B1 | High | The PWA's core mechanism is *screen-on + continuous high-accuracy GPS*, which `docs/SYSTEM_DESIGN.md:330` names as a known heavy drain. A long ride on a mounted phone will need external power. |
 | R-B2 | Medium | `enableHighAccuracy: true, maximumAge: 0` (`useGeo.ts:36`) is the most expensive possible geolocation configuration, applied unconditionally. `maximumAge: 0` forbids reusing even a 200 ms-old cached fix. |
-| R-B3 | Medium | No adaptive rate. `SYSTEM_DESIGN.md:330` explicitly recommends lowering the GPS rate when stationary and dimming the map when idle; neither is implemented. A rider stopped at a café burns full-rate GPS. |
+| R-B3 | Medium | No adaptive rate. `docs/SYSTEM_DESIGN.md:330` explicitly recommends lowering the GPS rate when stationary and dimming the map when idle; neither is implemented. A rider stopped at a café burns full-rate GPS. |
 | R-B4 | Medium | The client throttles in JS *after* the OS has already delivered the fix — the expensive part already happened. Native `timeInterval`/`distanceInterval` (mobile path) pushes throttling into the OS, which is strictly better. |
 | R-B5 | Medium | Four re-renders per second of the React tree plus four marker `setLngLat` calls (each triggering MapLibre repaints) is continuous GPU/CPU work, even when nobody is moving. |
 | R-B6 | Low | Phase 3 adds continuous WebRTC audio on top of all of the above. |
@@ -1104,7 +1104,7 @@ discarded. Either use them or remove them; as-is they mislead every future reade
 
 **Why it exists.** The one component that is genuinely this project's own work: the realtime
 location fan-out, the race-position math, and the server-side custody of secrets.
-`SYSTEM_DESIGN.md:129` scopes it precisely — "Go = backend brain".
+`docs/SYSTEM_DESIGN.md:129` scopes it precisely — "Go = backend brain".
 
 **Code goes here when:** it must be authoritative (rankings, timestamps, group membership), it must
 be shared across all clients, or it touches a secret (`ORS_API_KEY`, `LIVEKIT_API_SECRET`). Also
@@ -1131,7 +1131,7 @@ state is this package's property.
 
 ## `backend/internal/standings/`
 
-**Why it exists.** To keep the "who's 1st" algorithm (`SYSTEM_DESIGN.md §7`) as pure,
+**Why it exists.** To keep the "who's 1st" algorithm (`docs/SYSTEM_DESIGN.md §7`) as pure,
 dependency-free, testable geometry — one place, per `CLAUDE.md:113`.
 
 **Code goes here when:** it's a mathematical function of coordinates and routes: distance,
@@ -1156,7 +1156,7 @@ route/voice handlers will be far past it.
 
 ## `web/`
 
-**Why it exists.** The v1 client (`SYSTEM_DESIGN.md:26`). PWA-first because riders mount the phone
+**Why it exists.** The v1 client (`docs/SYSTEM_DESIGN.md:26`). PWA-first because riders mount the phone
 screen-on, so a wake lock covers the use case and the one thing a browser can't do — background
 location — never bites. Bought at the price of foreground-only tracking, in exchange for no
 dev-client builds and one shareable URL.
@@ -1180,7 +1180,7 @@ should push into the store and never own state itself.
 
 ## `web/src/store/`
 
-**Why it exists.** The single client-side source of truth (`SETUP_WEB.md:131`). Map and standings
+**Why it exists.** The single client-side source of truth (`docs/SETUP_WEB.md:131`). Map and standings
 are both pure views of `riders`; neither owns data.
 
 **Code goes here when:** state is read by more than one component or written from outside React (the
@@ -1239,7 +1239,7 @@ deliberately built on `node:` built-ins only).
 ## `mobile/`
 
 **Why it exists.** For exactly one capability: **true background location**
-(`SYSTEM_DESIGN.md:26`, `SETUP_WEB.md:174`). Pocketed, screen-off tracking is impossible in a
+(`docs/SYSTEM_DESIGN.md:26`, `docs/SETUP_WEB.md:174`). Pocketed, screen-off tracking is impossible in a
 browser at any price, and no service-worker trick changes that. Everything else in this directory is
 a re-implementation of code that already works in `web/`.
 
@@ -1266,11 +1266,11 @@ this directory is template scaffolding to be deleted.
 
 | File | Purpose | Changes when |
 |---|---|---|
-| `SYSTEM_DESIGN.md` | Source of truth for *why*: decisions, trade-offs, alternatives rejected, scaling path | A decision changes. **Not** a place for setup steps or code. |
+| `docs/SYSTEM_DESIGN.md` | Source of truth for *why*: decisions, trade-offs, alternatives rejected, scaling path | A decision changes. **Not** a place for setup steps or code. |
 | `CLAUDE.md` | Enforceable working rules: protocol contract, hard constraints, conventions, Do/Don't | A *rule* changes. Keep it short enough to actually be read. |
 | `README.md` | Entry point: what this is, repo layout, quickstart order, phase status | Phase status or layout changes. |
-| `SETUP_*.md` | Step-by-step checkpointed setup guides | Setup steps change. These currently embed full source listings, which is why they've drifted (`SETUP_BACKEND.md:308` vs `room.go:58`) — they should trend toward *pointing at* files rather than *copying* them. |
-| `ARCHITECTURE_REVIEW.md` | This document: the system *as built*, with debt, risks, and sequencing | A review is re-run. Subordinate to `SYSTEM_DESIGN.md` on intent. |
+| `SETUP_*.md` | Step-by-step checkpointed setup guides | Setup steps change. These currently embed full source listings, which is why they've drifted (`docs/SETUP_BACKEND.md:308` vs `room.go:58`) — they should trend toward *pointing at* files rather than *copying* them. |
+| `docs/ARCHITECTURE_REVIEW.md` | This document: the system *as built*, with debt, risks, and sequencing | A review is re-run. Subordinate to `docs/SYSTEM_DESIGN.md` on intent. |
 
 ---
 
@@ -1326,7 +1326,7 @@ out-and-back. This is ~100 lines and is the single highest-value test in the pro
 *Before writing the route endpoint, so the endpoint has something to validate against.*
 
 **7. Deploy it: Koyeb + Cloudflare Tunnel, `wss://`, real `CheckOrigin`.**
-The plan is already written (`SETUP_BACKEND.md:678`).
+The plan is already written (`docs/SETUP_BACKEND.md:678`).
 *This must come before Phase 2, not after, for a non-obvious reason:* geolocation, wake lock, PWA
 install, **and WebRTC all require a secure context**. Until the app is on HTTPS you cannot do a
 genuine two-phone road test, which means every feature after this point would be validated only in
@@ -1353,7 +1353,7 @@ Surface geolocation-permission denial and wake-lock refusal in the UI.
 
 **11. `POST /rides/{code}/route`** — ORS cycling proxy, `ORS_API_KEY` from env, decode the geometry
 to `[]standings.Pt`, store on the room **under `r.mu.Lock()`**. Return the polyline to the client as
-`[lng,lat]` so MapLibre can consume it directly (`SETUP_MOBILE.md:305`). Enforce once-per-ride to
+`[lng,lat]` so MapLibre can consume it directly (`docs/SETUP_MOBILE.md:305`). Enforce once-per-ride to
 protect the quota.
 
 **12. Precompute cumulative segment lengths** when the route is set, and rework `DistAlongRoute` to
@@ -1367,7 +1367,7 @@ and a subtle regression risk later.*
 **14. Web: route line layer + route fetch + a minimal destination picker.** GeoJSON source +
 `LineLayer` in `Map.tsx` (the `[lng,lat]` boundary stays there); `setRoute()` in `net/api.ts`; a
 long-press or a pasted-coords input to set the destination. Keep the picker deliberately crude —
-`SETUP_WEB.md:159` is right that a friend group can paste coordinates at first.
+`docs/SETUP_WEB.md:159` is right that a friend group can paste coordinates at first.
 
 **15. Windowed/monotonic projection + off-route detection.** Add `lastDistAlong` to `Client`,
 constrain the segment search to a window around it, and expose the already-computed `bestDist` as an
@@ -1384,7 +1384,7 @@ threshold until you've watched real standings on a real ride.*
 id, short TTL, `{token, url}` response.
 
 **18. Web voice + PTT** — `npm install livekit-client`, connect with `audio: false`, mic on press /
-off release. Mind the iOS gotcha (`SETUP_WEB.md:170`): audio must be started from a user gesture, so
+off release. Mind the iOS gotcha (`docs/SETUP_WEB.md:170`): audio must be started from a user gesture, so
 gate it behind an explicit "Join voice" tap.
 
 **19. Battery measurement with voice on.** GPS + screen + WebRTC together is the real load; measure
@@ -1409,11 +1409,11 @@ React or fixes are queued and handed off.
 **22. Native voice** — `registerGlobals()`, `AudioSession`, `LiveKitRoom` + PTT.
 
 **23. Battery tuning** — adaptive GPS rate when stationary, map dimming when idle
-(`SYSTEM_DESIGN.md:330`).
+(`docs/SYSTEM_DESIGN.md:330`).
 
 ## Deferred indefinitely (correctly)
 
-Auth, database, Redis, self-hosted tiles/ORS/LiveKit — all documented as the `SYSTEM_DESIGN.md §9`
+Auth, database, Redis, self-hosted tiles/ORS/LiveKit — all documented as the `docs/SYSTEM_DESIGN.md §9`
 scaling path and explicitly forbidden in v1 by `CLAUDE.md:127`. Do not pull these forward.
 
 ## The two ordering choices worth defending
@@ -1426,7 +1426,7 @@ scaling path and explicitly forbidden in v1 by `CLAUDE.md:127`. Do not pull thes
 # 11. Closing Observations
 
 **The design documentation is unusually strong, and that creates a specific hazard.**
-`SYSTEM_DESIGN.md` and `CLAUDE.md` describe the intended system with real precision — including
+`docs/SYSTEM_DESIGN.md` and `CLAUDE.md` describe the intended system with real precision — including
 trade-offs, alternatives rejected, and known sharp edges. The code follows them faithfully where it
 exists. But the docs describe the *target*, and in three places they describe as done what is in
 fact scaffolded: the rejoin policy, the standings, and the mobile app. `README.md:58-60` marks

@@ -45,7 +45,7 @@ func projectOntoSegment(a, b, p Pt) (Pt, float64) {
 }
 
 // DistAlongRoute returns metres travelled along route for point p:
-// the distance to the projection on the nearest segment. (SYSTEM_DESIGN.md §7.)
+// the distance to the projection on the nearest segment. (docs/SYSTEM_DESIGN.md §7.)
 //
 // Refinement for Phase 2: pass the rider's previous distAlong and constrain the segment
 // search to a window around it, so progress stays monotonic on out-and-back / looped routes

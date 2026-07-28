@@ -11,7 +11,7 @@ import (
 
 const broadcastInterval = 250 * time.Millisecond // ~4 Hz
 
-// riderState is one entry in the server → clients message (SYSTEM_DESIGN.md §6).
+// riderState is one entry in the server → clients message (docs/SYSTEM_DESIGN.md §6).
 type riderState struct {
 	ID        string  `json:"id"`
 	Name      string  `json:"name"`
