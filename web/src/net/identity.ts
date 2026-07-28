@@ -3,7 +3,7 @@
 // replace the zombie connection instead of seating a duplicate "ghost" rider.
 //
 // sessionStorage, deliberately NOT localStorage: it survives a page reload mid-ride,
-// but each tab gets its own id — with localStorage, the two-tab test in SETUP_WEB.md
+// but each tab gets its own id — with localStorage, the two-tab test in docs/SETUP_WEB.md
 // would share one id and the tabs would kick each other in a loop.
 const KEY = "horizon-rider-id";
 

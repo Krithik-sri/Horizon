@@ -4,21 +4,21 @@
 > like a native app. It renders the map, sends your GPS to the Go backend ~1×/sec over a
 > WebSocket, and draws everyone's dots from the broadcast it gets back. A screen **wake-lock**
 > keeps GPS alive on a handlebar-mounted phone — which is why a foreground-only PWA is enough for
-> v1 (true background tracking is the reason the native `mobile/` app exists; see `SYSTEM_DESIGN.md
+> v1 (true background tracking is the reason the native `mobile/` app exists; see `docs/SYSTEM_DESIGN.md
 > §1` "Client decision").
 >
 > **Phase 0 scope (this guide):** map shows your own dot, fed through the server. Join codes and
 > multiple riders (Phase 1) already work because the backend is room-based.
 
 Run commands from `web/` (PowerShell, your shell). Requires the Go backend running — see
-`SETUP_BACKEND.md`.
+`docs/SETUP_BACKEND.md`.
 
 ---
 
 ## 0. Prerequisites
 
 - **Node 20+** (`node --version`). No account, no card.
-- The **Go backend** running on `:8080` (`SETUP_BACKEND.md`). The app talks to it for `POST /rides`
+- The **Go backend** running on `:8080` (`docs/SETUP_BACKEND.md`). The app talks to it for `POST /rides`
   and `GET /ws`.
 
 ---
@@ -176,4 +176,4 @@ in `Ride.tsx` already renders it — but `distAlong` stays 0 until a route exist
 A browser stops `geolocation` when the tab is backgrounded / screen locked — no service-worker trick
 overrides it. The screen wake-lock covers the mounted, screen-on ride; true background tracking
 (pocketed / screen off) is exactly why the native `mobile/` app exists. Don't try to force it in the
-PWA — build the native client when that use-case becomes real (`SYSTEM_DESIGN.md §10`).
+PWA — build the native client when that use-case becomes real (`docs/SYSTEM_DESIGN.md §10`).

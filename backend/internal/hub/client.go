@@ -14,7 +14,7 @@ const (
 	maxMessageSize = 1024
 )
 
-// locMsg is the client → server message (CLAUDE.md / SYSTEM_DESIGN.md §6).
+// locMsg is the client → server message (CLAUDE.md / docs/SYSTEM_DESIGN.md §6).
 type locMsg struct {
 	Type    string  `json:"type"`
 	Lat     float64 `json:"lat"`

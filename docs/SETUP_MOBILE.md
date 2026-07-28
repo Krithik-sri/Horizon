@@ -21,9 +21,9 @@ numbered step there's a ✅ checkpoint — don't move on until it passes.
 
 **Current state:** `mobile/` exists as an untouched `create-expo-app` default template
 (expo-router layout) — none of the Horizon code below has been added yet, so step 1 is done
-and you start at step 2. The **v1 client is the PWA** (`SETUP_WEB.md`); pick this guide back
+and you start at step 2. The **v1 client is the PWA** (`docs/SETUP_WEB.md`); pick this guide back
 up when Phase 4 (true background GPS, screen off) becomes real. (The backend lives in
-`backend/`; see `SETUP_BACKEND.md`.)
+`backend/`; see `docs/SETUP_BACKEND.md`.)
 
 **Windows note:** you can build and run the **Android** dev client locally. For **iOS** you'll
 use **EAS cloud builds** (no Mac required for the build itself; a real iPhone still needs a
@@ -53,7 +53,7 @@ Still needed:
   adb devices   # should list at least one device/emulator
   ```
 - Accounts (free, no card), **used by the backend, not the app** — you can set these up later
-  when you do `SETUP_BACKEND.md`:
+  when you do `docs/SETUP_BACKEND.md`:
   - **LiveKit Cloud** — project URL + API key/secret (for voice).
   - **OpenRouteService** — free API key (for directions).
   - The map needs **nothing**.

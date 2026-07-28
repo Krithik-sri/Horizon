@@ -19,7 +19,7 @@ Run commands from the **repo root** (`C:\Data\Projects\Horizon`) unless a step s
 Commands are PowerShell (your shell). Each numbered step ends with a ✅ checkpoint — don't move
 on until it passes.
 
-**Naming note:** this file is `SETUP_BACKEND.md` (referenced by `CLAUDE.md` and `README.md`).
+**Naming note:** this file is `docs/SETUP_BACKEND.md` (referenced by `CLAUDE.md` and `README.md`).
 If you prefer `go-setup.md`, just rename it — nothing depends on the filename.
 
 ---
@@ -64,7 +64,7 @@ Set-Location ..
 ## 2. The standings math — `backend/internal/standings/standings.go`
 
 Pure geometry, no dependencies. Phase 0 has no route yet, so this isn't exercised until Phase 2
-— but scaffolding it now keeps the "who's 1st" logic (`SYSTEM_DESIGN.md §7`) in one place.
+— but scaffolding it now keeps the "who's 1st" logic (`docs/SYSTEM_DESIGN.md §7`) in one place.
 
 ```go
 package standings
@@ -114,7 +114,7 @@ func projectOntoSegment(a, b, p Pt) (Pt, float64) {
 }
 
 // DistAlongRoute returns metres travelled along route for point p:
-// the distance to the projection on the nearest segment. (SYSTEM_DESIGN.md §7.)
+// the distance to the projection on the nearest segment. (docs/SYSTEM_DESIGN.md §7.)
 //
 // Refinement for Phase 2: pass the rider's previous distAlong and constrain the segment
 // search to a window around it, so progress stays monotonic on out-and-back / looped routes
@@ -160,7 +160,7 @@ const (
 	maxMessageSize = 1024
 )
 
-// locMsg is the client → server message (CLAUDE.md / SYSTEM_DESIGN.md §6).
+// locMsg is the client → server message (CLAUDE.md / docs/SYSTEM_DESIGN.md §6).
 type locMsg struct {
 	Type    string  `json:"type"`
 	Lat     float64 `json:"lat"`
@@ -245,7 +245,7 @@ func (c *Client) writePump() {
 
 One `Room` per join code, owned by a single goroutine (`run`). All mutation of the rider set
 goes through its `register`/`unregister` channels, and it **broadcasts on a fixed ~4 Hz tick**
-rather than on every incoming `loc` (decouples fan-out from ingest — `SYSTEM_DESIGN.md §8`).
+rather than on every incoming `loc` (decouples fan-out from ingest — `docs/SYSTEM_DESIGN.md §8`).
 
 ```go
 package hub
@@ -261,7 +261,7 @@ import (
 
 const broadcastInterval = 250 * time.Millisecond // ~4 Hz
 
-// riderState is one entry in the server → clients message (SYSTEM_DESIGN.md §6).
+// riderState is one entry in the server → clients message (docs/SYSTEM_DESIGN.md §6).
 type riderState struct {
 	ID        string  `json:"id"`
 	Name      string  `json:"name"`
@@ -671,7 +671,7 @@ rider it is.
 
 The Android emulator can't reach `localhost` — it reaches your host machine at **`10.0.2.2`**.
 So the app's dev URL is `ws://10.0.2.2:8080/ws?ride=...&name=...` (already the value in
-`SETUP_MOBILE.md §7`). A physical device uses your computer's LAN IP instead.
+`docs/SETUP_MOBILE.md §7`). A physical device uses your computer's LAN IP instead.
 
 ---
 
@@ -703,7 +703,7 @@ deploy — you just wrap it.
 
 - **Phase 0:** `go run .` serves `/healthz`, `POST /rides` mints a code, and a `loc` sent to
   `/ws` comes back inside a `state` broadcast (step 10). Then the mobile app's own dot, fed
-  through this server, proves the toolchain end to end (`SYSTEM_DESIGN.md §11`).
+  through this server, proves the toolchain end to end (`docs/SYSTEM_DESIGN.md §11`).
 
 ### What's deliberately deferred
 - **`POST /rides/{code}/route`** — ORS cycling proxy + storing the polyline on the room (Phase 2).
