@@ -5,7 +5,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
+	"github.com/krithik/horizon/backend/internal/httpx"
 	"github.com/krithik/horizon/backend/internal/hub"
 )
 
@@ -29,12 +31,28 @@ func main() {
 	// Phase 3: mint a LiveKit JWT for this rider + room.
 	mux.HandleFunc("POST /rides/{code}/voice-token", notImplemented)
 
+	// Read once, at startup: a misconfiguration surfaces at boot rather than on a
+	// rider's phone, and the request path does no parsing.
+	origins := httpx.ParseOrigins(os.Getenv("ALLOWED_ORIGINS"))
+	if len(origins) == 0 {
+		log.Printf("WARNING: ALLOWED_ORIGINS is not set — every origin is allowed. " +
+			"Set it to a comma-separated list of origins before deploying.")
+	} else {
+		log.Printf("CORS: %d allowed origin(s): %s", len(origins), strings.Join(origins, ", "))
+	}
+
+	// Wrapping the whole mux, rather than individual handlers, is what makes /ws and
+	// every route added later inherit the policy without anyone remembering to.
+	// Panic recovery goes outside this; the rate limiter goes inside it, so that a
+	// preflight is never rate-limited.
+	handler := httpx.CORS(origins)(mux)
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 	log.Printf("horizon backend listening on :%s", port)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
+	if err := http.ListenAndServe(":"+port, handler); err != nil {
 		log.Fatal(err)
 	}
 }
