@@ -1,15 +1,3 @@
-// Package httpx holds the top-level HTTP middleware for the Horizon backend.
-//
-// Middleware lives here rather than in main.go so it can be unit-tested without a
-// listener, a mux, or a hub; main.go stays a composition root that only wires things
-// together (docs/DEVELOPMENT_GUIDE.md §backend/main.go). Panic recovery, request
-// logging, and per-IP rate limiting are planned to land in this same file.
-//
-// Nothing in this package may wrap http.ResponseWriter. gorilla/websocket obtains the
-// raw connection with a direct w.(http.Hijacker) type assertion, so a ResponseWriter
-// wrapper that does not itself implement Hijack breaks every WebSocket upgrade with
-// "response does not implement http.Hijacker". A future status-capturing logger must
-// implement Hijack() on its wrapper.
 package httpx
 
 import (

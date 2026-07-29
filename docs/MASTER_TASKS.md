@@ -10,7 +10,7 @@
 | **Generated** | 2026-07-28 |
 | **Repo state** | branch `main`, clean tree, HEAD `56a8482` |
 | **Total tasks** | 110 |
-| **Done** | 3 |
+| **Done** | 5 |
 | **Supersedes** | the task lists in [`docs/PROJECT_BOARD.md`](./PROJECT_BOARD.md) — see [ID migration](#id-migration) |
 
 ## How to use this document
@@ -310,7 +310,7 @@ share one ride with zero backend changes.
 | Stage | Tasks | Todo | In Progress | Done |
 |---|---|---|---|---|
 | 0 — Unblock | 3 | 0 | 0 | 3 |
-| 1 — Guardrails | 5 | 5 | 0 | 0 |
+| 1 — Guardrails | 5 | 2 | 1 | 2 |
 | 2 — Core pipe | 8 | 8 | 0 | 0 |
 | 3 — Tooling | 6 | 6 | 0 | 0 |
 | 4 — Visible failures | 6 | 6 | 0 | 0 |
@@ -321,7 +321,7 @@ share one ride with zero backend changes.
 | 9 — Voice | 10 | 10 | 0 | 0 |
 | 10 — Native | 17 | 17 | 0 | 0 |
 | 11 — Production | 12 | 12 | 0 | 0 |
-| **Total** | **110** | **107** | **0** | **3** |
+| **Total** | **110** | **104** | **1** | **5** |
 
 By group: Backend 25 · Stage-8 Standings 6 · Web 18 · Mobile 15 · Documentation 10 · Deployment 9 ·
 Voice 9 · Performance 7 · Maps 6 · Infrastructure 5.
@@ -559,9 +559,9 @@ handshakes are exempt from CORS and any string creates a room, so the pipe is te
   `501` stub. Blank `ALLOWED_ORIGINS` logs the startup warning and allows every origin.
 - **WebSocket verification — pass.** A real handshake through the middleware returns
   `101 Switching Protocols` followed by `welcome` and the 4 Hz `state` frames, so the
-  `http.Hijacker` assertion in `gorilla/websocket` is intact. Nothing in `httpx` wraps
-  `http.ResponseWriter`, and the package doc states that constraint for whoever adds request
-  logging.
+  `http.Hijacker` assertion in `gorilla/websocket` is intact. *(Updated at HZ-006: `httpx` now
+  does wrap `http.ResponseWriter`, and the wrapper implements `Hijack()` — `main_test.go` guards
+  it with a real WebSocket dial through the full chain.)*
 - **Manual browser verification — pending.** Not yet performed. `POST /rides` from
   `web/src/net/api.ts` is a *simple* request (no `Content-Type`, no body), so it exercises the
   simple-request path rather than the preflight path; the equivalent call has been confirmed by
@@ -571,7 +571,7 @@ handshakes are exempt from CORS and any string creates a room, so the pipe is te
 ---
 
 ### HZ-004 · Panic recovery middleware
-`Backend` · 🟠 High · **S** · Todo · `feature/backend-panic-recovery`
+`Backend` · 🟠 High · **S** · **Done ✅** · `feature/hz-004-http-foundation`
 **Depends on:** HZ-001
 **Why:** There is no recovery anywhere. A panic in any handler goroutine kills the process, and
 because all state is in memory, **every in-progress ride is destroyed with it.**
@@ -580,21 +580,34 @@ because all state is in memory, **every in-progress ride is destroyed with it.**
 - `backend/main.go` — outermost wrapper, outside CORS
 
 **Acceptance**
-- [ ] A panic in a handler returns 500 and the process survives
-- [ ] The panic value and stack are logged
-- [ ] Recovery is the outermost middleware
-- [ ] Panics in the read/write pumps are recovered too, or their absence is explicitly justified in
-      a comment — they run outside the HTTP handler chain
+- [x] A panic in a handler returns 500 and the process survives
+- [x] The panic value and stack are logged — `slog.Error` with `panic`, `stack`, `method`, `path`,
+      `remote`. The stack is captured *inside* the deferred call, while the panicking frames are
+      still live; taken any later it describes only the unwinding
+- [x] Recovery is the outermost middleware — `Recover → Log → CORS → mux`
+- [x] Panics in the read/write pumps are recovered too, **or their absence is explicitly justified
+      in a comment** — the justification route was taken, in `httpx/recover.go`'s doc comment.
+      `Room.run`, `readPump` and `writePump` remain unrecovered and a panic in any of them still
+      kills the process; recovering them means editing the files HZ-009–HZ-012 are about to
+      rewrite, and a half-recovered pump looping on corrupt state is worse than a clean crash
 
 **Testing**
-- [ ] `httptest`: a handler that panics yields 500 and the test process survives
-- [ ] The stack trace appears in the log output
-- [ ] Manual: a panicking test route does not drop other clients' WebSockets
+- [x] `httptest`: a handler that panics yields 500 and the test process survives
+- [x] The stack trace appears in the log output — asserted to contain the panicking frame by name
+- [ ] Manual: a panicking test route does not drop other clients' WebSockets — **pending**, needs
+      a temporary panic route; no such route exists and adding one is out of scope
+
+**Beyond the written criteria**
+- `http.ErrAbortHandler` is re-panicked, not swallowed. net/http uses it as a sentinel to abort a
+  handler silently; converting it to a 500 would fabricate an error the handler deliberately avoided
+- No response is written when headers were already sent, or when the connection was hijacked —
+  a 500 injected into a live WebSocket's frame stream would corrupt it
+- The 500 body is generic; the panic value and stack go only to the log
 
 ---
 
 ### HZ-005 · `http.Server` timeouts and graceful shutdown
-`Backend` · 🟠 High · **S** · Todo · `feature/backend-server-lifecycle`
+`Backend` · 🟠 High · **S** · **Done ✅** · `feature/hz-004-http-foundation`
 **Depends on:** HZ-001
 **Why:** `http.ListenAndServe` leaves `ReadHeaderTimeout`, `ReadTimeout`, and `IdleTimeout` unset, so
 a slow-loris client can hold connections indefinitely. There is also no drain on SIGTERM, which
@@ -603,22 +616,40 @@ matters the moment HZ-032 deploys to a platform that restarts containers.
 - `backend/main.go` — construct an `http.Server`; `signal.NotifyContext`; `srv.Shutdown(ctx)`
 
 **Acceptance**
-- [ ] `ReadHeaderTimeout` set (5s); `IdleTimeout` set (120s)
-- [ ] **No `WriteTimeout`, or one long enough not to kill WebSockets** — a naive `WriteTimeout`
-      breaks long-lived connections. Whichever is chosen, comment why.
-- [ ] SIGTERM/SIGINT stops accepting, drains with a bounded grace period, then exits 0
-- [ ] Active WebSockets receive a close frame during shutdown rather than being cut
-- [ ] Startup and shutdown are logged
+- [x] `ReadHeaderTimeout` set (5s); `IdleTimeout` set (120s)
+- [x] **No `WriteTimeout`, or one long enough not to kill WebSockets** — none set, and
+      `ReadTimeout` is likewise left at 0. Both are absolute deadlines armed when the request
+      begins, not idle timeouts, so either one would kill a ride-length WebSocket at exactly N
+      seconds. The reasoning is a comment block in the `http.Server` literal, aimed at whoever
+      arrives later intending to "harden" the server
+- [x] SIGTERM/SIGINT stops accepting, drains with a bounded grace period (15s), then exits 0
+- [ ] **Active WebSockets receive a close frame during shutdown rather than being cut** —
+      **deliberately not implemented**, at the direction of this branch's scope. `srv.Shutdown`
+      does not close hijacked connections (Go's documentation is explicit), so this needs a
+      hub-level teardown *and* an exit path for `Room.run`, which has neither. Deferred to HZ-012
+- [x] Startup and shutdown are logged
 
 **Testing**
-- [ ] A WebSocket held open for >2 minutes with no data is not killed by a server timeout
-- [ ] SIGTERM during an active ride closes cleanly; clients report a normal close and reconnect
-- [ ] A connection that sends no headers is dropped after `ReadHeaderTimeout`
+- [ ] A WebSocket held open for >2 minutes with no data is not killed by a server timeout —
+      **pending**, a 2-minute wall-clock test
+- [ ] SIGTERM during an active ride closes cleanly; clients report a normal close and reconnect —
+      **pending**, and blocked on the close-frame criterion above
+- [ ] A connection that sends no headers is dropped after `ReadHeaderTimeout` — **pending**,
+      needs a raw socket held open without headers
+
+**Beyond the written criteria**
+- `http.ErrServerClosed` is explicitly not treated as a failure. `Shutdown` makes `ListenAndServe`
+  return it, so the naive `log.Fatal(err)` would exit 1 on every clean stop and make the
+  orchestrator read a graceful shutdown as a crash
+- `srv.ErrorLog` is routed into the structured stream, so net/http's own internal errors are JSON
+  rather than unformatted stderr
+- Windows never really delivers SIGTERM, so the drain path is only genuinely exercised on the
+  Linux deployment target — noted in a comment and in `docs/SETUP_BACKEND.md`
 
 ---
 
 ### HZ-006 · Structured logging and request logging
-`Backend` · 🟠 High · **M** · Todo · `feature/backend-structured-logging`
+`Backend` · 🟠 High · **M** · **In Progress** · `feature/hz-004-http-foundation`
 **Depends on:** HZ-004
 **Why:** The backend emits exactly one `log.Printf`, at startup. When a rider says *"I vanished
 halfway up the climb"* there is no data to distinguish GPS loss, wake-lock refusal, socket drop, a
@@ -633,20 +664,65 @@ debugged from a moving bicycle.
 - `backend/.env.example` — `LOG_LEVEL`
 
 **Acceptance**
-- [ ] `log/slog` with a JSON handler; level from `LOG_LEVEL`, default `info`
-- [ ] Info: connect, disconnect (with reason), room create, room destroy
+- [x] `log/slog` with a JSON handler; level from `LOG_LEVEL`, default `info` — built in `main.go`
+      and injected; no package globals. An unparseable level degrades to info with a warning
+      rather than refusing to boot
+- [ ] Info: connect, disconnect (with reason), room create, room destroy — **not started**
 - [ ] Warn: dropped frame (**rate-limited — 4 Hz × N clients must not flood**), malformed message,
-      unknown ride code, upgrade failure
-- [ ] Every hub line carries `ride` and `rider` as structured fields
-- [ ] **No coordinates above debug level.** Location is the most sensitive data class in the app;
-      debug must never be enabled in a deployed build
-- [ ] Zero third-party logging dependencies
+      unknown ride code, upgrade failure — **not started**
+- [ ] Every hub line carries `ride` and `rider` as structured fields — **not started**
+- [x] **No coordinates above debug level** — vacuously true today: nothing inside `internal/hub`
+      logs at all, and the request middleware never sees a `loc` frame. Must be re-checked when
+      the hub lines land
+- [x] Zero third-party logging dependencies — `log/slog` is stdlib
 
 **Testing**
-- [ ] Connect and disconnect a client; both lines appear with correct fields
-- [ ] Send malformed JSON; a warn line appears and the connection survives
-- [ ] Set `LOG_LEVEL=debug`; coordinates appear. Set `info`; they do not
-- [ ] Fill a client's send buffer; the dropped-frame warning is rate-limited, not per-frame
+- [ ] Connect and disconnect a client; both lines appear with correct fields — **not started**
+- [ ] Send malformed JSON; a warn line appears and the connection survives — **not started**
+- [ ] Set `LOG_LEVEL=debug`; coordinates appear. Set `info`; they do not — **not started**
+- [ ] Fill a client's send buffer; the dropped-frame warning is rate-limited, not per-frame —
+      **not started**
+
+**What landed on `feature/hz-004-http-foundation`** — the HTTP edge only
+
+The logger, the middleware split, the shared `http.ResponseWriter` wrapper, and one structured
+line per request: method, path, status, duration, bytes, remote. Covered by
+`internal/httpx/logging_test.go` and by `main_test.go` against the real chain.
+
+Three decisions worth recording:
+
+- **The query string is never logged.** `/ws` carries `?name=` and `?rider=` — a display name and
+  a stable identity. Only `r.URL.Path` is logged, never `RawQuery`, `RequestURI`, or a body.
+  `main_test.go` asserts a real `/ws` request leaves neither value anywhere in the log.
+- **A hijacked request logs 101, not 200.** `responseRecorder.Hijack` records the upgrade, because
+  gorilla writes the handshake straight to the connection and bypasses the writer entirely.
+  `duration` on that line is the handshake, not the ride — `ServeWS` returns once the pumps start.
+- **Panic values are rendered with `fmt.Sprint`, not `slog.Any`.** The panic line belongs to
+  HZ-004's `Recover`, but how it *serialises* is a logging concern, so it is recorded here.
+  Post-implementation verification found that `slog.Any` hands an arbitrary value to
+  `json.Marshal`, which renders a struct carrying only unexported fields as `"panic":{}` — the
+  value silently lost, leaving only the stack to work from. `slog.String("panic", fmt.Sprint(v))`
+  is lossless for everything a panic can hold. Confirmed against five panic shapes:
+
+  | Panic value | `slog.Any` | `fmt.Sprint` |
+  |---|---|---|
+  | `"plain string panic"` | `"plain string panic"` | unchanged |
+  | runtime index-out-of-range | `"runtime error: index out of range [3]…"` | unchanged |
+  | `errors.New("wrapped failure")` | `"wrapped failure"` | unchanged |
+  | `struct{ hidden int }{42}` | **`{}`** — value lost | **`"{42}"`** |
+
+  Strings and errors were never affected — slog special-cases both — which is why the original
+  unit test (asserting only that the field was non-nil) did not catch it. The fix is commented at
+  the call site in `internal/httpx/recover.go` so it is not "simplified" back to `slog.Any`.
+
+**Still outstanding — all of it inside `internal/hub`**
+
+`hub.go`, `room.go` and `client.go` emit nothing. Landing those lines needs a logger threaded into
+`hub.New()` and onto `Room`/`Client` (`.With("ride", code)` at construction, so no call site can
+forget the field). One hazard found during the audit and worth carrying forward: **the dropped-frame
+site (`room.go`, the `default:` arm) sits inside `r.mu.RLock()`** — logging there would do
+synchronous I/O under the room read lock, on the 4 Hz broadcast path. Count under the lock, emit
+outside it.
 
 ---
 
