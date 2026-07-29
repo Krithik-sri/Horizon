@@ -10,7 +10,7 @@
 | **Generated** | 2026-07-28 |
 | **Repo state** | branch `main`, clean tree, HEAD `56a8482` |
 | **Total tasks** | 110 |
-| **Done** | 0 |
+| **Done** | 1 |
 | **Supersedes** | the task lists in [`docs/PROJECT_BOARD.md`](./PROJECT_BOARD.md) — see [ID migration](#id-migration) |
 
 ## How to use this document
@@ -309,7 +309,7 @@ share one ride with zero backend changes.
 
 | Stage | Tasks | Todo | In Progress | Done |
 |---|---|---|---|---|
-| 0 — Unblock | 3 | 3 | 0 | 0 |
+| 0 — Unblock | 3 | 2 | 0 | 1 |
 | 1 — Guardrails | 5 | 5 | 0 | 0 |
 | 2 — Core pipe | 8 | 8 | 0 | 0 |
 | 3 — Tooling | 6 | 6 | 0 | 0 |
@@ -321,7 +321,7 @@ share one ride with zero backend changes.
 | 9 — Voice | 10 | 10 | 0 | 0 |
 | 10 — Native | 17 | 17 | 0 | 0 |
 | 11 — Production | 12 | 12 | 0 | 0 |
-| **Total** | **110** | **110** | **0** | **0** |
+| **Total** | **110** | **109** | **0** | **1** |
 
 By group: Backend 25 · Stage-8 Standings 6 · Web 18 · Mobile 15 · Documentation 10 · Deployment 9 ·
 Voice 9 · Performance 7 · Maps 6 · Infrastructure 5.
@@ -468,7 +468,7 @@ not after.**
 ## Backend
 
 ### HZ-001 · CORS middleware with `OPTIONS` preflight
-`Backend` · 🔴 Critical · **S** · Todo · `bugfix/cors-preflight-middleware`
+`Backend` · 🔴 Critical · **S** · **Done ✅** · `bugfix/cors-preflight-middleware`
 **Depends on:** —
 **Why:** `POST /rides` sends no `Access-Control-Allow-Origin`. The dev page is at `:5173` and the API
 at `:8080`, so the browser blocks the response, the promise rejects, and the lobby reports
@@ -482,18 +482,45 @@ handshakes are exempt from CORS and any string creates a room, so the pipe is te
 - `docs/SETUP_BACKEND.md` — document the variable
 
 **Acceptance**
-- [ ] `POST /rides` from `http://localhost:5173` succeeds and the code reaches the UI
-- [ ] `OPTIONS` returns 204 with `Allow-Origin`, `Allow-Methods`, `Allow-Headers`
-- [ ] Preflighted `Content-Type: application/json` requests pass — HZ-053 and HZ-073 need this
-- [ ] Origins come from `ALLOWED_ORIGINS`; empty means permissive **and logs a warning**
-- [ ] The middleware wraps the whole mux, so `/ws` and future routes inherit it
-- [ ] No third-party dependency added
+- [x] `POST /rides` from `http://localhost:5173` succeeds and the code reaches the UI —
+      *server side verified; the "reaches the UI" half is pending browser verification below*
+- [x] `OPTIONS` returns 204 with `Allow-Origin`, `Allow-Methods`, `Allow-Headers`
+- [x] Preflighted `Content-Type: application/json` requests pass — HZ-053 and HZ-073 need this
+- [x] Origins come from `ALLOWED_ORIGINS`; empty means permissive **and logs a warning**
+- [x] The middleware wraps the whole mux, so `/ws` and future routes inherit it
+- [x] No third-party dependency added
 
 **Testing**
-- [ ] `httptest`: simple POST carries the allow-origin header
-- [ ] `httptest`: preflight returns 204 with the right headers
-- [ ] `httptest`: a disallowed origin is refused when `ALLOWED_ORIGINS` is set
+- [x] `httptest`: simple POST carries the allow-origin header
+- [x] `httptest`: preflight returns 204 with the right headers
+- [x] `httptest`: a disallowed origin is refused when `ALLOWED_ORIGINS` is set
 - [ ] Manual: "Start a ride" works in the browser with backend and web on different ports
+      — **pending**
+
+**Verification** *(audited 2026-07-29 against `backend/` at branch `feature/hz-001-cors-middleware`)*
+
+- **Unit tests — pass.** `backend/internal/httpx/middleware_test.go`, 27 subtests across
+  `TestParseOrigins` and `TestCORS`. `go test -count=1 ./...`, `go vet ./...` and
+  `go build ./...` are all clean. Coverage goes past the list above: `Origin: null` is denied,
+  matching is case-exact, the headers survive an inner 500, and `Allow-Origin` is never `*`.
+  `-race` was **not** run — it needs `CGO_ENABLED=1` and a C toolchain; HZ-019's CI will cover it.
+- **Runtime verification — pass.** Against a running binary with
+  `ALLOWED_ORIGINS=http://localhost:5173,http://192.168.1.50:5173`: an allowed origin gets
+  `200` + the echoed `Access-Control-Allow-Origin`; a disallowed origin gets `200` with **no**
+  allow-origin header (the browser discards it, which is how CORS refuses) and a disallowed
+  *preflight* gets `403`; an allowed preflight on `/rides/{code}/route` returns `204` with the
+  full header set — proving it terminates in the middleware and never reaches the
+  `501` stub. Blank `ALLOWED_ORIGINS` logs the startup warning and allows every origin.
+- **WebSocket verification — pass.** A real handshake through the middleware returns
+  `101 Switching Protocols` followed by `welcome` and the 4 Hz `state` frames, so the
+  `http.Hijacker` assertion in `gorilla/websocket` is intact. Nothing in `httpx` wraps
+  `http.ResponseWriter`, and the package doc states that constraint for whoever adds request
+  logging.
+- **Manual browser verification — pending.** Not yet performed. `POST /rides` from
+  `web/src/net/api.ts` is a *simple* request (no `Content-Type`, no body), so it exercises the
+  simple-request path rather than the preflight path; the equivalent call has been confirmed by
+  hand, but "Start a ride" has not been clicked in a browser. Close this box before the Stage 0
+  gate is called.
 
 ---
 
