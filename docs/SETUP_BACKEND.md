@@ -526,7 +526,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
+	"github.com/krithik/horizon/backend/internal/httpx"
 	"github.com/krithik/horizon/backend/internal/hub"
 )
 
@@ -550,12 +552,28 @@ func main() {
 	// Phase 3: mint a LiveKit JWT for this rider + room.
 	mux.HandleFunc("POST /rides/{code}/voice-token", notImplemented)
 
+	// Read once, at startup: a misconfiguration surfaces at boot rather than on a
+	// rider's phone, and the request path does no parsing.
+	origins := httpx.ParseOrigins(os.Getenv("ALLOWED_ORIGINS"))
+	if len(origins) == 0 {
+		log.Printf("WARNING: ALLOWED_ORIGINS is not set — every origin is allowed. " +
+			"Set it to a comma-separated list of origins before deploying.")
+	} else {
+		log.Printf("CORS: %d allowed origin(s): %s", len(origins), strings.Join(origins, ", "))
+	}
+
+	// Wrapping the whole mux, rather than individual handlers, is what makes /ws and
+	// every route added later inherit the policy without anyone remembering to.
+	// Panic recovery goes outside this; the rate limiter goes inside it, so that a
+	// preflight is never rate-limited.
+	handler := httpx.CORS(origins)(mux)
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 	log.Printf("horizon backend listening on :%s", port)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
+	if err := http.ListenAndServe(":"+port, handler); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -570,6 +588,38 @@ func notImplemented(w http.ResponseWriter, _ *http.Request) {
 }
 ```
 
+### The CORS wrapper
+
+`ListenAndServe` is handed `handler`, **not** `mux`. The browser cross-origin policy lives in
+`backend/internal/httpx/middleware.go` (read the file — it is short and the reasoning is in the
+comments, and this guide deliberately does not copy source that can drift).
+
+Why it matters: in dev the page is served by Vite on `:5173` while this server is on `:8080`, so
+every call the browser makes is cross-origin. Without the wrapper `POST /rides` mints a code, the
+browser discards the response, and the lobby reports *"Couldn't reach the server"* while the server
+is working fine.
+
+Three things the wrapper is doing, all of which are easy to get wrong:
+
+- **It wraps the whole mux, once.** A route added later inherits the policy without anyone
+  remembering to add it, and responses the mux generates itself (404, 405) still carry the headers
+  a browser needs in order to *show* you the failure.
+- **It answers `OPTIONS` preflights itself and returns 204.** The mux registers no `OPTIONS`
+  pattern, so a preflight that reached it would get a 405 — and a 405 is a failed preflight, which
+  would make every JSON-bodied endpoint (the Phase 2 route proxy, the Phase 3 voice token)
+  unreachable from a browser.
+- **It never wraps `http.ResponseWriter`.** `gorilla/websocket` gets the raw connection via a
+  `w.(http.Hijacker)` type assertion, so a wrapper that does not itself implement `Hijack()` breaks
+  **every** WebSocket upgrade with *"response does not implement http.Hijacker"*. If you add
+  status-capturing request logging later, implement `Hijack()` on your wrapper.
+
+A disallowed origin is not rejected server-side on ordinary requests — the request runs and the
+response simply carries no `Access-Control-Allow-Origin`, which is precisely how CORS refuses.
+Rejecting would stop no attacker (CORS is enforced by the *browser*, on the response) while
+breaking every legitimate caller that sends no `Origin` at all: the native client, `curl`, and
+platform health checks. Server-side origin enforcement belongs on the WebSocket path, in the
+upgrader's `CheckOrigin` — see *What's deliberately deferred* at the end of this guide.
+
 ---
 
 ## 7. Environment template — `backend/.env.example`
@@ -581,6 +631,12 @@ in place. **Never commit a real `.env`** — only this `.env.example` with blank
 # Port the server listens on (optional; defaults to 8080)
 PORT=
 
+# Browser origins allowed to call the HTTP API (CORS), comma separated. Matching is
+# exact — no wildcards, and a trailing slash makes an entry that can never match.
+# Leave blank in local dev: blank allows every origin and warns at startup. Set it for
+# any deployment, e.g. https://horizon.example.com,http://localhost:5173
+ALLOWED_ORIGINS=
+
 # LiveKit Cloud (Phase 3 — voice). Server-side only, never in the app.
 LIVEKIT_API_KEY=
 LIVEKIT_API_SECRET=
@@ -589,6 +645,62 @@ LIVEKIT_URL=
 # OpenRouteService (Phase 2 — cycling directions). Server-side only.
 ORS_API_KEY=
 ```
+
+### `ALLOWED_ORIGINS`
+
+**Purpose.** The allowlist of browser origins permitted to call the HTTP API. It is the only
+input to the CORS wrapper from §6 — nothing else configures it. It does **not** yet guard the
+WebSocket upgrade; that is a separate, still-open piece of work (see the deferred list below).
+
+**Format.** A comma-separated list of origins. An origin is *scheme + host + port* and nothing
+else — no path, and **no trailing slash**.
+
+- Whitespace around entries is trimmed, and empty entries are dropped, so `a, b`, `a,b` and
+  `a,,b,` all parse identically.
+- **Matching is exact string equality.** Nothing is normalised. `http://localhost:5173/` has a
+  trailing slash and can therefore never match; `HTTP://LocalHost:5173` differs in case and will
+  not match either. Both are misconfigurations to fix, not things the server repairs for you.
+- **No wildcards.** `*.horizon.app` is a literal string that will never match anything.
+- **Blank means permissive** — every origin is allowed, and the server logs a warning at startup
+  saying so. That is the deliberate zero-config default for local development, because the dev
+  page is reachable as `localhost`, as `127.0.0.1` and as a DHCP-assigned LAN address (a phone on
+  your wifi), which are three separate origins. **Set it before deploying.**
+
+**Example.**
+
+```
+ALLOWED_ORIGINS=http://localhost:5173,https://horizon.app
+```
+
+**What you should see at startup.** Set, and the server confirms what it parsed:
+
+```
+CORS: 2 allowed origin(s): http://localhost:5173, https://horizon.app
+horizon backend listening on :8080
+```
+
+Blank, and it warns instead — if you see this line on a deployed box, it is a bug to fix:
+
+```
+WARNING: ALLOWED_ORIGINS is not set — every origin is allowed. Set it to a comma-separated list of origins before deploying.
+```
+
+**Checking it by hand**, without a browser — an allowed origin gets the header echoed back:
+
+```powershell
+curl.exe -i -X POST -H "Origin: http://localhost:5173" http://localhost:8080/rides
+# -> 200, Access-Control-Allow-Origin: http://localhost:5173, {"code":"9DK6PY"}
+```
+
+A preflight (what the browser sends ahead of any JSON-bodied request) gets a 204 and the policy:
+
+```powershell
+curl.exe -i -X OPTIONS -H "Origin: http://localhost:5173" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type" http://localhost:8080/rides
+# -> 204, Allow-Methods: GET, POST, OPTIONS · Allow-Headers: Content-Type, Authorization · Max-Age: 600
+```
+
+An origin that is *not* on the list gets a normal response with **no** `Access-Control-Allow-Origin`
+header — that absence is the refusal, and the browser is what enforces it.
 
 ---
 
@@ -694,8 +806,10 @@ Go, and Cloudflare's free realtime primitive — Durable Objects — is TypeScri
 3. Tighten `upgrader.CheckOrigin` (step 5) to your real origin before going public, and switch
    the client from `ws://` to `wss://`.
 
-The Go code above is host-agnostic (it only reads `PORT`), so nothing here changes when you
-deploy — you just wrap it.
+The Go code above is host-agnostic — it reads only `PORT` and `ALLOWED_ORIGINS`, so nothing here
+changes when you deploy; you just wrap it. **Set `ALLOWED_ORIGINS` to the tunnel hostname as part
+of that step** (see §7): a deployed server left blank allows every origin, which is exactly the
+state the startup warning is telling you about.
 
 ---
 
@@ -712,3 +826,7 @@ deploy — you just wrap it.
   `register` case must still kick the zombie connection (marked `TODO(rejoin)` in `room.go`).
 - **Windowed standings projection**, **empty-room GC**, **join-code validation/expiry**, and
   **`wss://` + origin checks** — noted inline above; add as you harden past Phase 1.
+- **WebSocket origin enforcement** — `upgrader.CheckOrigin` still returns `true` for every
+  request. The CORS wrapper in §6 covers the *HTTP* API only; CORS does not apply to a WebSocket
+  handshake, so `ALLOWED_ORIGINS` currently has no effect on `/ws`. Wiring the same allowlist into
+  `CheckOrigin` is its own task, and it must land before the server is publicly reachable.
