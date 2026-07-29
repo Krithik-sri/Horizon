@@ -1,0 +1,35 @@
+# Line-ending policy for Horizon — this file is canonical.
+#
+# The repo is developed on Windows and deployed on Linux. Git for Windows ships
+# with core.autocrlf=true in its system config, so contributors get CRLF working
+# trees whether they asked for one or not. Attributes take precedence over that
+# config, which is why the policy lives here and not in a setup instruction
+# somebody has to remember: LF in the index, LF on checkout, on every machine.
+#
+# This was safe to add because the index was already 100% LF when it landed
+# (verified with `git ls-files --eol`: 90 text files, zero i/crlf). It therefore
+# changed no tracked content and required no `git add --renormalize`.
+#
+# Concretely it fixes: gofmt reporting every .go file as unformatted because it
+# read CRLF, which would otherwise fail the `go fmt` diff check in CI.
+
+* text=auto eol=lf
+
+# Images. Marked binary so Git never applies EOL conversion and never tries to
+# diff or merge them as text. Only PNGs are committed today; the rest are listed
+# so a future asset lands correctly the first time.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+
+# Signing material and certificates. All of these are ignored by
+# mobile/.gitignore — the declaration is here so that a deliberate force-add
+# cannot silently corrupt one through line-ending conversion.
+*.jks binary
+*.p8 binary
+*.p12 binary
+*.keystore binary
+*.mobileprovision binary

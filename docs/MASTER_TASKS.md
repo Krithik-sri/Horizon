@@ -10,7 +10,7 @@
 | **Generated** | 2026-07-28 |
 | **Repo state** | branch `main`, clean tree, HEAD `56a8482` |
 | **Total tasks** | 110 |
-| **Done** | 1 |
+| **Done** | 3 |
 | **Supersedes** | the task lists in [`docs/PROJECT_BOARD.md`](./PROJECT_BOARD.md) — see [ID migration](#id-migration) |
 
 ## How to use this document
@@ -309,7 +309,7 @@ share one ride with zero backend changes.
 
 | Stage | Tasks | Todo | In Progress | Done |
 |---|---|---|---|---|
-| 0 — Unblock | 3 | 2 | 0 | 1 |
+| 0 — Unblock | 3 | 0 | 0 | 3 |
 | 1 — Guardrails | 5 | 5 | 0 | 0 |
 | 2 — Core pipe | 8 | 8 | 0 | 0 |
 | 3 — Tooling | 6 | 6 | 0 | 0 |
@@ -321,7 +321,7 @@ share one ride with zero backend changes.
 | 9 — Voice | 10 | 10 | 0 | 0 |
 | 10 — Native | 17 | 17 | 0 | 0 |
 | 11 — Production | 12 | 12 | 0 | 0 |
-| **Total** | **110** | **109** | **0** | **1** |
+| **Total** | **110** | **107** | **0** | **3** |
 
 By group: Backend 25 · Stage-8 Standings 6 · Web 18 · Mobile 15 · Documentation 10 · Deployment 9 ·
 Voice 9 · Performance 7 · Maps 6 · Infrastructure 5.
@@ -340,7 +340,7 @@ above, so a group's tasks are scattered across stages by design. Each entry read
 ## Infrastructure
 
 ### HZ-002 · Untrack `.tsbuildinfo`, extend `.gitignore`
-`Infrastructure` · 🟢 Low · **S** · Todo · `bugfix/untrack-tsbuildinfo`
+`Infrastructure` · 🟢 Low · **S** · **Done ✅** · `bugfix/untrack-tsbuildinfo`
 **Depends on:** —
 **Why:** `web/tsconfig.app.tsbuildinfo` and `web/tsconfig.node.tsbuildinfo` are tracked and absent
 from `web/.gitignore`, so every build dirties the tree and every diff carries noise. Doing this
@@ -350,18 +350,43 @@ first keeps all 109 later diffs clean.
 - `git rm --cached web/tsconfig.app.tsbuildinfo web/tsconfig.node.tsbuildinfo`
 
 **Acceptance**
-- [ ] Both files are removed from the index but remain on disk
-- [ ] `*.tsbuildinfo` is ignored
-- [ ] `git status` is clean after `npm run build`
+- [x] Both files are removed from the index but remain on disk
+- [x] `*.tsbuildinfo` is ignored
+- [x] `git status` is clean after `npm run build`
 
 **Testing**
-- [ ] `cd web && npm run build && git status --short` prints nothing
-- [ ] A fresh clone builds without the files present
+- [x] `cd web && npm run build && git status --short` prints nothing — verified: the build
+      regenerated both `.tsbuildinfo` files and `dist/`, and none of them appear in `git status`
+- [x] A fresh clone builds without the files present — verified by deleting both files and
+      rebuilding; `tsc -b` does a full build and regenerates them
+
+**Implemented beyond the original scope** *(the file was open; each rule was verified with
+`git check-ignore`)*
+
+The task as written covered only `web/.gitignore`. The audit that preceded this work found the
+same class of gap across all four ignore files, so they were closed together:
+
+- **Root `.gitignore` rewritten** to hold repo-wide concerns only — OS junk (`.DS_Store`,
+  `Thumbs.db`, `desktop.ini`), editor swap/backup files (`*.swp`, `*.swo`, `*~`), un-anchored
+  `.idea/`, a `**/.vscode/*` rule with negations for the four files a team shares deliberately,
+  root-level secrets, and logs/temp files. Its three duplicated subpackage rules
+  (`/web/node_modules`, `/web/dist`, `/mobile/node_modules`) were dropped — each package already
+  ignores its own build output, and two files having to agree forever is how they drift.
+- **`backend/.gitignore`** — added `*.test`, `*.out`, `coverage.*` (HZ-019's CI needs coverage
+  ignored) and `*.exe`; anchored `server` → `/server`, which previously also matched a *directory*
+  named `server` at any depth.
+- **`mobile/.gitignore`** — anchored `example` → `/example`. Unanchored it matched any file or
+  directory named `example` at any depth, so a future `mobile/src/components/example/` would have
+  vanished silently.
+- **`web/.gitignore`** — `*.tsbuildinfo` (the task item), plus `.eslintcache` and `coverage/`.
+
+Verified that no currently-tracked file became ignored: `git ls-files | git check-ignore --stdin`
+returns empty. All three `.env.example` files remain trackable.
 
 ---
 
 ### HZ-003 · `.editorconfig` and line-ending policy
-`Infrastructure` · 🟢 Low · **S** · Todo · `feature/editorconfig`
+`Infrastructure` · 🟢 Low · **S** · **Done ✅** · `feature/editorconfig`
 **Depends on:** —
 **Why:** The repo is developed on Windows and deployed on Linux. Without a stated policy, CRLF/LF
 churn will eventually produce a diff that touches every line of a file.
@@ -372,13 +397,34 @@ churn will eventually produce a diff that touches every line of a file.
 - `docs/CONTRIBUTING.md` — note `core.autocrlf input` for Windows contributors
 
 **Acceptance**
-- [ ] `.editorconfig` matches the existing style of `web/src/` and `backend/`
-- [ ] `.gitattributes` normalises line endings on commit
-- [ ] No existing file is reformatted by this change
+- [x] `.editorconfig` matches the existing style of `web/src/` and `backend/` — tabs for `*.go`
+      (gofmt already produces them), 2-space for TS/TSX/JS/JSON/CSS/MD (what `web/src/` already
+      uses). `*.md` opts out of `trim_trailing_whitespace`: two trailing spaces are a hard line
+      break in Markdown, and the docs are Markdown-heavy
+- [x] `.gitattributes` normalises line endings on commit — `* text=auto eol=lf`
+- [x] No existing file is reformatted by this change
 
 **Testing**
-- [ ] `git diff --stat` after adding shows only the two new files
-- [ ] Editing a `.go` and a `.tsx` file in an EditorConfig-aware editor produces no style drift
+- [x] `git diff --stat` after adding shows only the two new files — plus the ignore and doc files
+      this branch also changes; **zero** tracked source content changed
+- [ ] Editing a `.go` and a `.tsx` file in an EditorConfig-aware editor produces no style drift —
+      **pending**, needs a human in an editor
+
+**Note on the premise — normalisation was not required**
+
+The task anticipated CRLF/LF churn. The audit found the index was **already 100% LF**
+(`git ls-files --eol`: 90 text files, 21 binary, 0 `i/crlf`). The CRLF was only ever in the
+working tree, put there by `core.autocrlf=true` in `C:/Program Files/Git/etc/gitconfig` — the Git
+for Windows *system* default, not repo or user config.
+
+So `.gitattributes` changed no tracked content and needed no `git add --renormalize` and no
+history rewrite. What it fixes is real and immediate: **all seven `backend/*.go` files were failing
+`gofmt -l` purely because gofmt read CRLF**, which would have failed HZ-019's `go fmt` diff check
+in CI. That resolves on the next checkout, when the files materialise as LF.
+
+`docs/CONTRIBUTING.md` was updated to describe `.gitattributes` as the canonical policy rather
+than `core.autocrlf input` — attributes take precedence over that config, so telling contributors
+to set it was advice that could not be relied on and is no longer needed.
 
 ---
 

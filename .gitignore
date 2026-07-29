@@ -1,5 +1,40 @@
-/.idea
-/mobile/node_modules
-/mobile/.vscode
-/web/node_modules
-/web/dist
+# Repo-wide ignores only.
+#
+# Package-specific rules live in backend/.gitignore, web/.gitignore and
+# mobile/.gitignore. This file previously duplicated three of them
+# (/web/node_modules, /web/dist, /mobile/node_modules), which meant two files
+# had to agree forever; the duplicates are gone and the packages own their own
+# build output.
+
+# OS junk
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# Editors — swap, backup and IDE state
+*.swp
+*.swo
+*~
+.idea/
+
+# VS Code: ignore the folder's contents, but keep the files a team shares
+# deliberately. **/ is required — a pattern with a slash in the middle is
+# anchored to this directory, and .vscode/ exists in subpackages too.
+**/.vscode/*
+!**/.vscode/settings.json
+!**/.vscode/extensions.json
+!**/.vscode/launch.json
+!**/.vscode/tasks.json
+
+# Secrets. Only .env.example is ever committed — the negation must follow the
+# exclusion or it has no effect.
+.env
+.env.*
+!.env.example
+
+# Logs and scratch files
+*.log
+logs/
+*.tmp
+*.temp
