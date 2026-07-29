@@ -1,0 +1,37 @@
+# EditorConfig — https://editorconfig.org
+#
+# Enforcement of line endings belongs to .gitattributes; this file is what makes
+# an editor agree with that policy before a file ever reaches Git, so the two
+# never disagree in a working tree.
+#
+# These rules describe the style the repo already had when they were written —
+# tabs in Go because gofmt produces them, two spaces everywhere else because
+# web/src and the JSON configs are written that way. Adding this file reformats
+# nothing.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# gofmt owns Go formatting completely. Tabs are not a preference here — a
+# space-indented .go file is one `go fmt` away from a diff nobody intended.
+[*.go]
+indent_style = tab
+
+[{go.mod,go.sum}]
+indent_style = tab
+
+[*.{ts,tsx,js,jsx,mjs,cjs,json,jsonc,css,html,yml,yaml}]
+indent_style = space
+indent_size = 2
+
+# Two trailing spaces are a hard line break in Markdown. Trimming them silently
+# reflows a paragraph, so the docs opt out of that one rule and keep the rest.
+[*.md]
+trim_trailing_whitespace = false

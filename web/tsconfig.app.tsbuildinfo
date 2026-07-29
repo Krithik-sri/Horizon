@@ -1,1 +1,0 @@
-{"root":["./src/app.tsx","./src/ride.tsx","./src/main.tsx","./src/types.ts","./src/location/usegeo.ts","./src/location/usewakelock.ts","./src/map/map.tsx","./src/net/api.ts","./src/net/config.ts","./src/net/identity.ts","./src/net/ws.ts","./src/store/ride.ts","./vite-env.d.ts"],"version":"5.9.3"}

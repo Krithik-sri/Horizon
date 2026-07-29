@@ -136,7 +136,17 @@ If the last one works, your environment is correct — that's the core pipe end 
 - **TypeScript:** use the workspace TypeScript version. ESLint and Prettier configs don't exist yet
   ([DEBT-M4](./PROJECT_BOARD.md#-medium-1)) — **match the surrounding code**: 2-space indent, double
   quotes, semicolons, trailing commas in multiline literals.
-- **Line endings:** LF. On Windows, `git config --global core.autocrlf input`.
+- **EditorConfig:** `.editorconfig` at the repo root sets charset, line endings, final newline,
+  trailing whitespace and indent width. Most editors honour it natively; VS Code needs the
+  EditorConfig extension. It encodes the style the repo already had — it will not reformat
+  anything you have not touched.
+- **Line endings:** LF, enforced by [`.gitattributes`](../.gitattributes) — **that file is the
+  canonical policy.** `* text=auto eol=lf` means LF in the index and LF in your working tree on
+  every platform, and Git attributes take precedence over any `core.autocrlf` value, including the
+  `true` that Git for Windows sets system-wide at install time. You do **not** need to configure
+  `core.autocrlf` yourself; if you already set it, leave it, because it no longer decides anything.
+  A CRLF file in your working tree now means your editor wrote one — `.editorconfig` is what stops
+  that.
 
 ---
 

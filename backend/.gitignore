@@ -1,6 +1,13 @@
-# build output
-server
-server.exe
+# build output — anchored, so a future package or directory named "server"
+# under backend/ is not silently ignored
+/server
+/server.exe
+*.exe
+
+# test binaries and coverage output (`go test -c`, `go test -coverprofile`)
+*.test
+*.out
+coverage.*
 
 # secrets — only .env.example is committed
 .env

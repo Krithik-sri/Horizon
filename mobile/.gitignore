@@ -36,7 +36,9 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
-example
+# anchored: unanchored, this matched any file or directory named "example" at any
+# depth, so a future mobile/src/components/example/ would have vanished silently
+/example
 
 # generated native folders
 /ios
