@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	devOrigin   = "http://localhost:5173"
-	lanOrigin   = "http://192.168.1.50:5173"
+	devOrigin   = "http://localhost:8081"
+	lanOrigin   = "http://192.168.1.50:8081"
 	otherOrigin = "http://evil.example.com"
 )
 
@@ -34,7 +34,7 @@ func TestParseOrigins(t *testing.T) {
 		// Exact matching is the contract: ParseOrigins must not normalise. A trailing
 		// slash or a different case is a misconfiguration the operator has to fix, not
 		// something this function silently repairs.
-		{"case preserved", "HTTP://LocalHost:5173", []string{"HTTP://LocalHost:5173"}},
+		{"case preserved", "HTTP://LocalHost:8081", []string{"HTTP://LocalHost:8081"}},
 		{"trailing slash preserved", devOrigin + "/", []string{devOrigin + "/"}},
 	}
 
@@ -212,7 +212,7 @@ func TestCORS(t *testing.T) {
 			// configured entry that carries one simply never matches.
 			name:            "case-differing origin does not match",
 			origins:         allowlist,
-			req:             simple("HTTP://LocalHost:5173"),
+			req:             simple("HTTP://LocalHost:8081"),
 			wantStatus:      http.StatusOK,
 			wantAllowOrigin: "",
 			wantInnerCalled: true,

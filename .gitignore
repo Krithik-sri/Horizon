@@ -1,10 +1,8 @@
 # Repo-wide ignores only.
 #
-# Package-specific rules live in backend/.gitignore, web/.gitignore and
-# mobile/.gitignore. This file previously duplicated three of them
-# (/web/node_modules, /web/dist, /mobile/node_modules), which meant two files
-# had to agree forever; the duplicates are gone and the packages own their own
-# build output.
+# Package-specific rules live in backend/.gitignore and mobile/.gitignore.
+# This file deliberately does not duplicate them — the packages own their own
+# build output, so there is only ever one file to change.
 
 # OS junk
 .DS_Store

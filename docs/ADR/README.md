@@ -21,8 +21,7 @@ what would have to change for the decision to be revisited.
 
 ## When a decision needs an ADR
 
-Per [`docs/DEVELOPMENT_GUIDE.md` §4](../DEVELOPMENT_GUIDE.md#4-development-workflow), escalate to an
-ADR when the change:
+Escalate to an ADR when the change:
 
 - adds a third-party service or a backend dependency,
 - changes the WebSocket protocol,
@@ -39,9 +38,12 @@ Everything else goes straight to a branch. Most work does not need an ADR.
 | [001](./ADR-001.md) | **Go, not Node**, for the realtime server | Accepted | Never, realistically — but if the team shrinks to zero Go familiarity |
 | [002](./ADR-002.md) | **WebSockets, not REST polling**, for live state | Accepted | Corporate proxies break long-lived sockets in practice |
 | [003](./ADR-003.md) | **OpenFreeMap**, not Google Maps or Mapbox, for tiles | Accepted | OpenFreeMap degrades, or a budget appears |
-| [004](./ADR-004.md) | **PWA first**, native app later | Accepted | Background location becomes a requirement, not a nice-to-have |
+| [004](./ADR-004.md) | **PWA first**, native app later | Superseded by [ADR-007](./ADR-007.md) | Background location becomes a requirement, not a nice-to-have |
 | [005](./ADR-005.md) | **LiveKit** for voice, not custom WebRTC | Accepted | LiveKit's free tier changes, or usage outgrows it |
 | [006](./ADR-006.md) | **Zero paid services** as a hard constraint | Accepted | The project stops being a hobby project |
+| [007](./ADR-007.md) | **Native Android-first**; the PWA is cancelled | Accepted | The product walks back toward an install-free client |
+| [008](./ADR-008.md) | **Two backends**: Go for ephemeral realtime, Supabase for durable state | Accepted | Supabase Realtime's throughput improves, or convoy state needs to be durable |
+| [009](./ADR-009.md) | **No standings, no ranking** — the race indicator is removed | Accepted | Never — this follows directly from the No Gamification pillar |
 
 ## Template
 

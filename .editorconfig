@@ -6,8 +6,8 @@
 #
 # These rules describe the style the repo already had when they were written —
 # tabs in Go because gofmt produces them, two spaces everywhere else because
-# web/src and the JSON configs are written that way. Adding this file reformats
-# nothing.
+# mobile/src and the JSON configs are written that way. Adding this file
+# reformats nothing.
 
 root = true
 

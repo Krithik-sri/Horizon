@@ -152,7 +152,7 @@ func run() error {
 //
 // LOG_LEVEL=debug is the only level at which rider coordinates may be logged, and it
 // must never be enabled in a deployed build — location is the most sensitive data class
-// in this app (docs/DEVELOPMENT_GUIDE.md).
+// in this app (docs/SYSTEM_DESIGN.md, "Security & privacy").
 func newLogger(raw string) (*slog.Logger, error) {
 	level := slog.LevelInfo
 	var parseErr error

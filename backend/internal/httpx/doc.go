@@ -2,7 +2,7 @@
 //
 // Middleware lives here rather than in main.go so it can be unit-tested without a
 // listener, a mux, or a hub; main.go stays a composition root that only wires things
-// together (docs/DEVELOPMENT_GUIDE.md §backend/main.go).
+// together (see buildHandler in backend/main.go).
 //
 // One concern per file: cors.go, logging.go, recover.go, and responsewriter.go — the
 // shared http.ResponseWriter wrapper that logging needs for the status code and that

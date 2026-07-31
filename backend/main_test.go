@@ -17,7 +17,7 @@ import (
 	"github.com/krithik/horizon/backend/internal/hub"
 )
 
-const testOrigin = "http://localhost:5173"
+const testOrigin = "http://localhost:8081"
 
 // syncBuffer is a bytes.Buffer that survives the server writing to it from a handler
 // goroutine while the test reads it. The plain buffer would be a data race.

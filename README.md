@@ -1,18 +1,28 @@
-# Horizon 🚴
+# Horizon 🏍️
 
-Live group-tracking + voice for bike rides. Everyone sees everyone else on a shared map,
-talks over push-to-talk, and gets a race-style "who's 1st" indicator.
+A premium native companion for motorcycle riders — not a navigation app. Horizon exists for
+everything that happens between departure and arrival: it stays quiet while you ride, shows
+only what's essential, and gives the rest back to you when you stop. See
+[`docs/PRODUCT.md`](./docs/PRODUCT.md) for the full vision.
 
-- **Client (v1):** installable **PWA** — Vite + React + TypeScript (`web/`)
-- **Native path (later):** React Native / Expo (`mobile/`) — only needed for true background GPS
-- **Voice:** live push-to-talk (LiveKit)
-- **Backend:** Go realtime server (WebSockets)
+- **App:** React Native + Expo (dev client), TypeScript — Android first, iOS later (`mobile/`)
+- **Voice:** live group push-to-talk (LiveKit)
+- **Backend:** Go realtime server (WebSockets) + Supabase for durable state
 - **Maps:** MapLibre + OpenFreeMap tiles (**no API key, no card**)
 - **Directions:** OpenRouteService (free key, no card)
 
-> Full design rationale lives in [`docs/SYSTEM_DESIGN.md`](./docs/SYSTEM_DESIGN.md) — including why the
-> v1 client is a PWA, not the native app (§1 "Client decision"). Read that first.
+> Full design rationale lives in [`docs/SYSTEM_DESIGN.md`](./docs/SYSTEM_DESIGN.md). Read that first.
 > **No credit card is required to build or run this project.**
+
+---
+
+## The three registers
+
+Every screen belongs to one of three states of mind, not just a page: **Departure** (calm,
+confident, ready — "am I ready to ride?"), **Motion** (the app goes almost invisible — only
+essential information, all attention on the road), and **Return** (reflective — photos,
+journal, stats, everything deferred during the ride becomes available). See
+[`docs/PRODUCT.md`](./docs/PRODUCT.md) and [`docs/DESIGN.md`](./docs/DESIGN.md).
 
 ---
 
@@ -23,20 +33,14 @@ horizon/
 ├── README.md                # you are here
 ├── CLAUDE.md                # working rules for this repo (protocol contract, conventions)
 ├── docs/                    # every other document lives here
+│   ├── PRODUCT.md               # product vision — the source of truth
 │   ├── SYSTEM_DESIGN.md         # architecture, tech stack, design choices
+│   ├── DESIGN.md                # design system — tokens, type, color, motion
+│   ├── SETUP.md                  # Expo app setup
 │   ├── SETUP_BACKEND.md         # Go server setup
-│   ├── SETUP_WEB.md             # PWA setup — the v1 client
-│   ├── SETUP_MOBILE.md          # Expo app setup — the future native path (Phase 4)
-│   ├── DEVELOPMENT_GUIDE.md     # the engineering handbook — how we build
-│   ├── CONTRIBUTING.md          # setup + contribution mechanics
-│   ├── PROJECT_BOARD.md         # live task board: sprint, backlog, debt, known bugs
-│   ├── MASTER_TASKS.md          # the full task breakdown (supersedes the board's task lists)
-│   ├── ROADMAP.md               # milestones, risks, success criteria
-│   ├── ARCHITECTURE_REVIEW.md   # the system as built, with debt and risks
 │   └── ADR/                     # architecture decision records
-├── backend/                 # Go realtime server (WS hub, standings; route/voice stubbed)
-├── web/                     # installable PWA (Vite + React + TS)
-└── mobile/                  # React Native (Expo) — default template scaffold for now
+├── backend/                 # Go realtime server (WS hub; route/voice stubbed 501)
+└── mobile/                  # React Native (Expo) app — Android first, iOS later
 ```
 
 ---
@@ -49,14 +53,13 @@ lives in [`docs/`](./docs/) — see [`docs/README.md`](./docs/README.md) for the
 | Question | Document |
 |----------|----------|
 | What are the hard rules? | [`CLAUDE.md`](./CLAUDE.md) |
+| What is Horizon, and why? | [`docs/PRODUCT.md`](./docs/PRODUCT.md) |
 | Why is the architecture like this? | [`docs/SYSTEM_DESIGN.md`](./docs/SYSTEM_DESIGN.md) · [`docs/ADR/`](./docs/ADR/) |
-| What does the system look like today? | [`docs/ARCHITECTURE_REVIEW.md`](./docs/ARCHITECTURE_REVIEW.md) |
-| How do we build? (principles, workflow, standards) | [`docs/DEVELOPMENT_GUIDE.md`](./docs/DEVELOPMENT_GUIDE.md) |
-| How do I set up and submit a change? | [`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md) · `docs/SETUP_*.md` |
-| What should I work on? | [`docs/PROJECT_BOARD.md`](./docs/PROJECT_BOARD.md) · [`docs/MASTER_TASKS.md`](./docs/MASTER_TASKS.md) |
-| Where is this going? | [`docs/ROADMAP.md`](./docs/ROADMAP.md) |
+| What do things look like — colors, type, motion? | [`docs/DESIGN.md`](./docs/DESIGN.md) |
+| How do I set up and run the app? | [`docs/SETUP.md`](./docs/SETUP.md) |
+| How do I set up and run the backend? | [`docs/SETUP_BACKEND.md`](./docs/SETUP_BACKEND.md) |
 
-**New contributors start with [`docs/CONTRIBUTING.md`](./docs/CONTRIBUTING.md).**
+**New contributors start with [`docs/PRODUCT.md`](./docs/PRODUCT.md)** — it outranks every technical doc here.
 
 ---
 
@@ -66,15 +69,13 @@ Set the repo up in this order. Each step is self-contained.
 
 1. **Backend** — get the Go WebSocket server running locally.
    → follow [`docs/SETUP_BACKEND.md`](./docs/SETUP_BACKEND.md)
-2. **Web (PWA)** — the v1 client; point it at your local server.
-   → follow [`docs/SETUP_WEB.md`](./docs/SETUP_WEB.md)
-3. **Accounts you'll need for Phases 2–3 (all free, none need a card):**
-   - [OpenRouteService](https://openrouteservice.org/dev/#/signup) — free API key for cycling directions (Phase 2)
-   - [LiveKit Cloud](https://cloud.livekit.io) — API key + secret + project URL (Phase 3)
+2. **App** — the Expo dev client, pointed at your local server.
+   → follow [`docs/SETUP.md`](./docs/SETUP.md)
+3. **Free accounts you'll need** (none require a card):
+   - [OpenRouteService](https://openrouteservice.org/dev/#/signup) — free API key for cycling/motorcycle-friendly directions
+   - [LiveKit Cloud](https://cloud.livekit.io) — API key + secret + project URL, free tier
+   - [Supabase](https://supabase.com) — free tier, for durable state (auth, storage, ride history)
    - Map tiles: **OpenFreeMap** — nothing to sign up for, just a style URL
-
-The Expo app ([`docs/SETUP_MOBILE.md`](./docs/SETUP_MOBILE.md)) is deliberately later — build it when
-Phase 4 (background GPS with the screen off) becomes real.
 
 ---
 
@@ -82,24 +83,8 @@ Phase 4 (background GPS with the screen off) becomes real.
 
 | Phase | Goal | Status |
 |-------|------|--------|
-| 0 | Map shows your own moving dot; server echoes WS messages. | ✅ (web) |
-| 1 | Two phones see each other live. **(the whole product in miniature)** | ✅ (web) |
-| 2 | Route + 1st/2nd/3rd standings. | backend stubbed (`501`) |
+| 0 | App shell + design tokens; own dot shows on the map. | `mobile/` has no app code yet |
+| 1 | Two phones see each other live. **(the whole product in miniature)** | — |
+| 2 | Route line. | backend stubbed (`501`) |
 | 3 | Push-to-talk voice. | backend stubbed (`501`) |
-| 4 | Background location (native app), reconnect hardening, battery. | — |
-
----
-
-## Tech at a glance
-
-| Concern | v1 (PWA, `web/`) | Native path (`mobile/`, later) |
-|---------|------------------|--------------------------------|
-| App | Vite + React + TypeScript | React Native (Expo dev client), TypeScript |
-| Map renderer | `maplibre-gl` (MapLibre GL JS) | `@maplibre/maplibre-react-native` |
-| Map tiles | OpenFreeMap style URL, no key | same |
-| Directions | OpenRouteService, proxied via backend | same |
-| Location | `navigator.geolocation` + `navigator.wakeLock` | `expo-location` (+ `expo-task-manager`) |
-| Realtime client | built-in global `WebSocket` (no package) | same |
-| Voice | `livekit-client` + LiveKit Cloud | `@livekit/react-native` + LiveKit Cloud |
-| State | zustand | zustand |
-| Realtime server | Go + `github.com/gorilla/websocket` | same (client-agnostic) |
+| 4 | Background location, reconnect hardening, battery. | — |

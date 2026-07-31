@@ -23,7 +23,7 @@ const healthPath = "/healthz"
 // r.RequestURI are not, and neither is any request body.
 //
 // Coordinates never appear here at all: this middleware sees the WebSocket upgrade, not
-// the loc frames that flow over it afterwards (docs/DEVELOPMENT_GUIDE.md — location is
+// the loc frames that flow over it afterwards (docs/SYSTEM_DESIGN.md — location is
 // the most sensitive data class in the app).
 //
 // remote is r.RemoteAddr as the server sees it. Behind the Cloudflare Tunnel this

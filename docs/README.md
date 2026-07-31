@@ -9,21 +9,16 @@ probably belongs in an ADR.
 
 | Document | Answers | Update it when |
 |----------|---------|----------------|
+| [`PRODUCT.md`](./PRODUCT.md) | What is Horizon, and why does it exist? | The product vision or philosophy changes. **Outranks every technical doc below** — when a technical choice disagrees with it, this document wins or the disagreement becomes an ADR. |
 | [`SYSTEM_DESIGN.md`](./SYSTEM_DESIGN.md) | Why is the architecture like this? | A decision changes. Not a place for setup steps or code. |
+| [`DESIGN.md`](./DESIGN.md) | What do things look like — colors, type, spacing, motion? | A design token or system rule changes. |
 | [`ADR/`](./ADR/) | Why isn't it something else? | A decision is made — one record per decision, never edited in place. |
-| [`ARCHITECTURE_REVIEW.md`](./ARCHITECTURE_REVIEW.md) | What does the system look like today? | A review is re-run. Subordinate to `docs/SYSTEM_DESIGN.md` on intent. |
-| [`DEVELOPMENT_GUIDE.md`](./DEVELOPMENT_GUIDE.md) | How do we build? Principles, workflow, standards. | The engineering process changes. |
-| [`CONTRIBUTING.md`](./CONTRIBUTING.md) | How do I set up and submit a change? | Contribution mechanics change. **Start here if you're new.** |
+| [`SETUP.md`](./SETUP.md) | How do I run the Expo app? | App setup steps change. |
 | [`SETUP_BACKEND.md`](./SETUP_BACKEND.md) | How do I run the Go server? | Backend setup steps change. |
-| [`SETUP_WEB.md`](./SETUP_WEB.md) | How do I run the PWA — the v1 client? | Web setup steps change. |
-| [`SETUP_MOBILE.md`](./SETUP_MOBILE.md) | How do I run the Expo app (Phase 4)? | Mobile setup steps change. |
-| [`PROJECT_BOARD.md`](./PROJECT_BOARD.md) | What should I work on? Sprint, backlog, debt, known bugs. | Any task changes status. |
-| [`MASTER_TASKS.md`](./MASTER_TASKS.md) | What is the full task breakdown? | Tasks are added or re-prioritised. Supersedes the board's task lists. |
-| [`ROADMAP.md`](./ROADMAP.md) | Where is this going? Milestones, risks, success criteria. | Milestone scope or timing changes. |
 
 ## Referring to these files
 
 Markdown links are relative — siblings as `./NAME.md`, ADRs as `./ADR/ADR-00N.md`, and the two
 root files as `../README.md` / `../CLAUDE.md`. Prose mentions in backticks are repo-root-relative
-(`docs/SETUP_BACKEND.md`), the same convention as `web/src/types.ts`, so a path means the same
-thing wherever it's quoted.
+(`docs/SETUP_BACKEND.md`), the same convention as `backend/internal/hub/room.go`, so a path
+means the same thing wherever it's quoted.
