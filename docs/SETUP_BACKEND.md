@@ -2,7 +2,11 @@
 
 > Goal: a single Go binary that holds one WebSocket per rider, groups them into rooms by join
 > code, and broadcasts everyone's combined position back to the room ~4×/sec. This is the
-> **spine** of Horizon — everything else (route, standings, voice) is a view on this pipe.
+> **spine** of Horizon — everything else (route, voice) is a view on this pipe.
+>
+> **This server owns ephemeral realtime only** — live positions, LiveKit tokens, and the ORS
+> route proxy. Durable state (auth, ride history, journal, photos) belongs to Supabase, not this
+> server — see `docs/ADR/ADR-008.md` for the split.
 >
 > **Phase 0 scope (this guide):** `GET /healthz`, `POST /rides` (mint a join code), and
 > `GET /ws` (the location in/out pipe). The route proxy and voice-token endpoints are
@@ -46,7 +50,6 @@ go version    # expect go1.22 or newer (we use net/http method routing, added in
 
 ```powershell
 New-Item -ItemType Directory backend\internal\hub -Force | Out-Null
-New-Item -ItemType Directory backend\internal\standings -Force | Out-Null
 Set-Location backend
 go mod init github.com/krithik/horizon/backend
 go get github.com/gorilla/websocket@latest
@@ -61,83 +64,7 @@ Set-Location ..
 
 ---
 
-## 2. The standings math — `backend/internal/standings/standings.go`
-
-Pure geometry, no dependencies. Phase 0 has no route yet, so this isn't exercised until Phase 2
-— but scaffolding it now keeps the "who's 1st" logic (`docs/SYSTEM_DESIGN.md §7`) in one place.
-
-```go
-package standings
-
-import "math"
-
-// Pt is a geographic point. Note: lat/lng order (the internal convention).
-// MapLibre/GeoJSON use [lng, lat] — convert at the client boundary, not here.
-type Pt struct {
-	Lat float64
-	Lng float64
-}
-
-const earthRadiusM = 6371000.0
-
-// Haversine returns the great-circle distance between a and b in metres.
-func Haversine(a, b Pt) float64 {
-	la1 := a.Lat * math.Pi / 180
-	la2 := b.Lat * math.Pi / 180
-	dLat := (b.Lat - a.Lat) * math.Pi / 180
-	dLng := (b.Lng - a.Lng) * math.Pi / 180
-	h := math.Sin(dLat/2)*math.Sin(dLat/2) +
-		math.Cos(la1)*math.Cos(la2)*math.Sin(dLng/2)*math.Sin(dLng/2)
-	return 2 * earthRadiusM * math.Asin(math.Min(1, math.Sqrt(h)))
-}
-
-// projectOntoSegment projects p onto segment a→b using a local planar approximation
-// (good enough at city scale). Returns the projected point and t in [0,1] along the segment.
-func projectOntoSegment(a, b, p Pt) (Pt, float64) {
-	latRef := a.Lat * math.Pi / 180
-	mPerDegLat := 111320.0
-	mPerDegLng := 111320.0 * math.Cos(latRef)
-
-	bx := (b.Lng - a.Lng) * mPerDegLng
-	by := (b.Lat - a.Lat) * mPerDegLat
-	px := (p.Lng - a.Lng) * mPerDegLng
-	py := (p.Lat - a.Lat) * mPerDegLat
-
-	seg2 := bx*bx + by*by
-	t := 0.0
-	if seg2 > 0 {
-		t = (px*bx + py*by) / seg2
-		t = math.Max(0, math.Min(1, t))
-	}
-	proj := Pt{Lat: a.Lat + (b.Lat-a.Lat)*t, Lng: a.Lng + (b.Lng-a.Lng)*t}
-	return proj, t
-}
-
-// DistAlongRoute returns metres travelled along route for point p:
-// the distance to the projection on the nearest segment. (docs/SYSTEM_DESIGN.md §7.)
-//
-// Refinement for Phase 2: pass the rider's previous distAlong and constrain the segment
-// search to a window around it, so progress stays monotonic on out-and-back / looped routes
-// where naive nearest-segment can snap to the wrong place.
-func DistAlongRoute(route []Pt, p Pt) float64 {
-	var cum, best float64
-	bestDist := math.Inf(1)
-	for i := 0; i+1 < len(route); i++ {
-		a, b := route[i], route[i+1]
-		proj, t := projectOntoSegment(a, b, p)
-		if d := Haversine(p, proj); d < bestDist {
-			bestDist = d
-			best = cum + t*Haversine(a, b)
-		}
-		cum += Haversine(a, b)
-	}
-	return best
-}
-```
-
----
-
-## 3. The connection — `backend/internal/hub/client.go`
+## 2. The connection — `backend/internal/hub/client.go`
 
 One `Client` per WebSocket. The **read pump** parses `loc` messages and stamps the rider's
 last-seen with the **server's** receive time (don't trust the phone's clock for staleness). The
@@ -241,7 +168,7 @@ func (c *Client) writePump() {
 
 ---
 
-## 4. The room — `backend/internal/hub/room.go`
+## 3. The room — `backend/internal/hub/room.go`
 
 One `Room` per join code, owned by a single goroutine (`run`). All mutation of the rider set
 goes through its `register`/`unregister` channels, and it **broadcasts on a fixed ~4 Hz tick**
@@ -255,22 +182,21 @@ import (
 	"sort"
 	"sync"
 	"time"
-
-	"github.com/krithik/horizon/backend/internal/standings"
 )
 
 const broadcastInterval = 250 * time.Millisecond // ~4 Hz
 
 // riderState is one entry in the server → clients message (docs/SYSTEM_DESIGN.md §6).
+//
+// Deliberately carries no position/rank: Horizon does not rank riders
+// (docs/ADR/ADR-009.md, "No Gamification" in docs/PRODUCT.md).
 type riderState struct {
-	ID        string  `json:"id"`
-	Name      string  `json:"name"`
-	Lat       float64 `json:"lat"`
-	Lng       float64 `json:"lng"`
-	Speed     float64 `json:"speed"`
-	AgeSec    int     `json:"ageSec"` // seconds since this rider's last fix (server clock)
-	Pos       int     `json:"pos"`
-	DistAlong float64 `json:"distAlong"`
+	ID     string  `json:"id"`
+	Name   string  `json:"name"`
+	Lat    float64 `json:"lat"`
+	Lng    float64 `json:"lng"`
+	Speed  float64 `json:"speed"`
+	AgeSec int     `json:"ageSec"` // seconds since this rider's last fix (server clock)
 }
 
 type stateMsg struct {
@@ -283,7 +209,6 @@ type Room struct {
 	code  string
 	mu    sync.RWMutex
 	rider map[*Client]bool
-	route []standings.Pt // set in Phase 2 via POST /rides/{code}/route
 
 	register   chan *Client
 	unregister chan *Client
@@ -307,10 +232,16 @@ func (r *Room) run() {
 			r.mu.Lock()
 			// Rejoin policy: c.id is stable across reconnects (hub.go), so a client
 			// already seated with the same id is a zombie connection from before a
-			// network drop. Kick it here (delete + close(send), like unregister) and
-			// optionally carry its last fix over to c — otherwise a reconnecting
-			// rider appears twice for up to ~60s (pongWait). See room.go for the
-			// current state of this policy.
+			// network drop (or a second device presenting the same id).
+			//
+			// TODO(rejoin): decide what happens to it. Under this lock you can:
+			//   1. find any existing old *Client in r.rider with old.id == c.id
+			//   2. kick it — delete(r.rider, old) + close(old.send), exactly like
+			//      the unregister case (its pumps then shut down on their own)
+			//   3. optionally carry its last fix over (old.lat/lng/speed/lastSeen → c)
+			//      so the rider's dot unfreezes instead of vanishing until the next fix
+			// Until this is implemented, a reconnecting rider appears twice for up to
+			// ~60s (pongWait, client.go) — the ghost-rider bug.
 			r.rider[c] = true
 			r.mu.Unlock()
 		case c := <-r.unregister:
@@ -330,29 +261,18 @@ func (r *Room) broadcast() {
 	now := time.Now()
 	r.mu.RLock()
 	riders := make([]riderState, 0, len(r.rider))
-	hasRoute := len(r.route) > 1
 	for c := range r.rider {
 		if c.lastSeen.IsZero() {
 			continue // hasn't sent a fix yet — don't draw a dot at (0,0)
 		}
-		rs := riderState{ID: c.id, Name: c.name, Lat: c.lat, Lng: c.lng, Speed: c.speed,
-			AgeSec: int(now.Sub(c.lastSeen).Seconds())}
-		if hasRoute {
-			rs.DistAlong = standings.DistAlongRoute(r.route, standings.Pt{Lat: c.lat, Lng: c.lng})
-		}
-		riders = append(riders, rs)
+		riders = append(riders, riderState{ID: c.id, Name: c.name, Lat: c.lat, Lng: c.lng,
+			Speed: c.speed, AgeSec: int(now.Sub(c.lastSeen).Seconds())})
 	}
 	r.mu.RUnlock()
 
-	// Standings: by distAlong desc once a route exists; until then, a stable order by id.
-	if hasRoute {
-		sort.Slice(riders, func(i, j int) bool { return riders[i].DistAlong > riders[j].DistAlong })
-	} else {
-		sort.Slice(riders, func(i, j int) bool { return riders[i].ID < riders[j].ID })
-	}
-	for i := range riders {
-		riders[i].Pos = i + 1
-	}
+	// Stable order by id so the client's list doesn't jitter between frames.
+	// Not a ranking — see riderState.
+	sort.Slice(riders, func(i, j int) bool { return riders[i].ID < riders[j].ID })
 
 	msg, err := json.Marshal(stateMsg{Type: "state", Ride: r.code, Riders: riders})
 	if err != nil {
@@ -371,7 +291,7 @@ func (r *Room) broadcast() {
 
 ---
 
-## 5. The hub — `backend/internal/hub/hub.go`
+## 4. The hub — `backend/internal/hub/hub.go`
 
 Owns the room map and upgrades incoming `/ws` requests. Each new client is greeted with a
 one-time `welcome` message carrying its id (so it can pick its own dot out of `state`), and
@@ -516,7 +436,7 @@ func validRiderID(s string) bool {
 
 ---
 
-## 6. Wiring it up — `backend/main.go`
+## 5. Wiring it up — `backend/main.go`
 
 ```go
 package main
@@ -673,7 +593,7 @@ func run() error {
 //
 // LOG_LEVEL=debug is the only level at which rider coordinates may be logged, and it
 // must never be enabled in a deployed build — location is the most sensitive data class
-// in this app (docs/DEVELOPMENT_GUIDE.md).
+// in this app (docs/SYSTEM_DESIGN.md, "Security & privacy").
 func newLogger(raw string) (*slog.Logger, error) {
 	level := slog.LevelInfo
 	var parseErr error
@@ -715,7 +635,8 @@ func buildHandler(logger *slog.Logger, origins []string, h *hub.Hub) http.Handle
 		writeJSON(w, map[string]string{"code": h.CreateRide()})
 	})
 
-	// Phase 2: proxy a cycling route to OpenRouteService, store the polyline on the room.
+	// Phase 2: proxy a route to OpenRouteService (driving-car profile — ORS has no motorcycle
+	// profile), store the polyline on the room.
 	mux.HandleFunc("POST /rides/{code}/route", notImplemented)
 	// Phase 3: mint a LiveKit JWT for this rider + room.
 	mux.HandleFunc("POST /rides/{code}/voice-token", notImplemented)
@@ -778,10 +699,13 @@ must too, and implementing only `Unwrap()` is not enough.
 
 ### The CORS wrapper
 
-Why it matters: in dev the page is served by Vite on `:5173` while this server is on `:8080`, so
-every call the browser makes is cross-origin. Without the wrapper `POST /rides` mints a code, the
-browser discards the response, and the lobby reports *"Couldn't reach the server"* while the server
-is working fine.
+Why it matters: the native Android app sends no `Origin` header at all — CORS is a browser-enforced
+mechanism, and neither RN's `WebSocket` nor `fetch` set one — so CORS never gates its requests. The
+wrapper exists for browser-based tooling instead, e.g. the Expo web dev server on `:8081`, where a
+JSON-bodied request to a different origin would otherwise be silently discarded by the browser.
+**CORS is not the auth boundary here** — it only decides which browser pages may read a response,
+never who may call the API. That boundary is the Supabase JWT check on the backend
+(`docs/ADR/ADR-008.md`).
 
 Three things the wrapper is doing, all of which are easy to get wrong:
 
@@ -805,7 +729,7 @@ upgrader's `CheckOrigin` — see *What's deliberately deferred* at the end of th
 
 ---
 
-## 7. Environment template — `backend/.env.example`
+## 6. Environment template — `backend/.env.example`
 
 Phase 0 needs none of these, but create the template now so the secret-handling convention is
 in place. **Never commit a real `.env`** — only this `.env.example` with blank values.
@@ -817,7 +741,7 @@ PORT=
 # Browser origins allowed to call the HTTP API (CORS), comma separated. Matching is
 # exact — no wildcards, and a trailing slash makes an entry that can never match.
 # Leave blank in local dev: blank allows every origin and warns at startup. Set it for
-# any deployment, e.g. https://horizon.example.com,http://localhost:5173
+# any deployment, e.g. https://horizon.example.com,http://localhost:8081
 ALLOWED_ORIGINS=
 
 # Log verbosity: debug | info | warn | error (case-insensitive). Blank means info.
@@ -833,14 +757,14 @@ LIVEKIT_API_KEY=
 LIVEKIT_API_SECRET=
 LIVEKIT_URL=
 
-# OpenRouteService (Phase 2 — cycling directions). Server-side only.
+# OpenRouteService (Phase 2 — driving-car profile; ORS has no motorcycle profile). Server-side only.
 ORS_API_KEY=
 ```
 
 ### `ALLOWED_ORIGINS`
 
 **Purpose.** The allowlist of browser origins permitted to call the HTTP API. It is the only
-input to the CORS wrapper from §6 — nothing else configures it. It does **not** yet guard the
+input to the CORS wrapper from §5 — nothing else configures it. It does **not** yet guard the
 WebSocket upgrade; that is a separate, still-open piece of work (see the deferred list below).
 
 **Format.** A comma-separated list of origins. An origin is *scheme + host + port* and nothing
@@ -848,8 +772,8 @@ else — no path, and **no trailing slash**.
 
 - Whitespace around entries is trimmed, and empty entries are dropped, so `a, b`, `a,b` and
   `a,,b,` all parse identically.
-- **Matching is exact string equality.** Nothing is normalised. `http://localhost:5173/` has a
-  trailing slash and can therefore never match; `HTTP://LocalHost:5173` differs in case and will
+- **Matching is exact string equality.** Nothing is normalised. `http://localhost:8081/` has a
+  trailing slash and can therefore never match; `HTTP://LocalHost:8081` differs in case and will
   not match either. Both are misconfigurations to fix, not things the server repairs for you.
 - **No wildcards.** `*.horizon.app` is a literal string that will never match anything.
 - **Blank means permissive** — every origin is allowed, and the server logs a warning at startup
@@ -860,13 +784,13 @@ else — no path, and **no trailing slash**.
 **Example.**
 
 ```
-ALLOWED_ORIGINS=http://localhost:5173,https://horizon.app
+ALLOWED_ORIGINS=http://localhost:8081,https://horizon.app
 ```
 
 **What you should see at startup.** Set, and the server confirms what it parsed:
 
 ```
-CORS: 2 allowed origin(s): http://localhost:5173, https://horizon.app
+CORS: 2 allowed origin(s): http://localhost:8081, https://horizon.app
 horizon backend listening on :8080
 ```
 
@@ -879,14 +803,14 @@ WARNING: ALLOWED_ORIGINS is not set — every origin is allowed. Set it to a com
 **Checking it by hand**, without a browser — an allowed origin gets the header echoed back:
 
 ```powershell
-curl.exe -i -X POST -H "Origin: http://localhost:5173" http://localhost:8080/rides
-# -> 200, Access-Control-Allow-Origin: http://localhost:5173, {"code":"9DK6PY"}
+curl.exe -i -X POST -H "Origin: http://localhost:8081" http://localhost:8080/rides
+# -> 200, Access-Control-Allow-Origin: http://localhost:8081, {"code":"9DK6PY"}
 ```
 
 A preflight (what the browser sends ahead of any JSON-bodied request) gets a 204 and the policy:
 
 ```powershell
-curl.exe -i -X OPTIONS -H "Origin: http://localhost:5173" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type" http://localhost:8080/rides
+curl.exe -i -X OPTIONS -H "Origin: http://localhost:8081" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type" http://localhost:8080/rides
 # -> 204, Allow-Methods: GET, POST, OPTIONS · Allow-Headers: Content-Type, Authorization · Max-Age: 600
 ```
 
@@ -971,7 +895,7 @@ crash to whatever supervises the process.
 
 ---
 
-## 8. Format, vet, build
+## 7. Format, vet, build
 
 ```powershell
 Set-Location backend
@@ -985,7 +909,7 @@ Set-Location ..
 
 ---
 
-## 9. Run it
+## 8. Run it
 
 ```powershell
 Set-Location backend
@@ -1005,7 +929,7 @@ Invoke-RestMethod -Method Post http://localhost:8080/rides      # -> code : ABC1
 
 ---
 
-## 10. Verify the WebSocket pipe (loc in → state out)
+## 9. Verify the WebSocket pipe (loc in → state out)
 
 Node 24 ships a global `WebSocket`, so no install needed. Create `backend\wstest.mjs`:
 
@@ -1037,7 +961,7 @@ node backend\wstest.mjs
 ```
 
 ✅ **Checkpoint:** a `welcome id: …` line immediately, then within ~250 ms a line like:
-`state: {"type":"state","ride":"TEST01","riders":[{"id":"...","name":"tester","lat":12.9716,"lng":77.5946,"speed":6.2,"ageSec":0,"pos":1,"distAlong":0}]}`
+`state: {"type":"state","ride":"TEST01","riders":[{"id":"...","name":"tester","lat":12.9716,"lng":77.5946,"speed":6.2,"ageSec":0}]}`
 and finally `PASS: welcome + state received`.
 
 That's the whole spine working: a `loc` went up, the hub stamped and stored it, and the tick
@@ -1046,11 +970,11 @@ rider it is.
 
 ---
 
-## 11. Connecting from the mobile app
+## 10. Connecting from the mobile app
 
 The Android emulator can't reach `localhost` — it reaches your host machine at **`10.0.2.2`**.
 So the app's dev URL is `ws://10.0.2.2:8080/ws?ride=...&name=...` (already the value in
-`docs/SETUP_MOBILE.md §7`). A physical device uses your computer's LAN IP instead.
+`docs/SETUP.md §7`). A physical device uses your computer's LAN IP instead.
 
 ---
 
@@ -1070,12 +994,12 @@ Go, and Cloudflare's free realtime primitive — Durable Objects — is TypeScri
      group that re-shares a link.
    - **Named tunnel** — stable hostname, but requires a domain you own added to Cloudflare
      (domains cost ~$10/yr; this is the one place "no card" bends if you want a fixed URL).
-3. Tighten `upgrader.CheckOrigin` (step 5) to your real origin before going public, and switch
+3. Tighten `upgrader.CheckOrigin` (step 4) to your real origin before going public, and switch
    the client from `ws://` to `wss://`.
 
 The Go code above is host-agnostic — it reads only `PORT` and `ALLOWED_ORIGINS`, so nothing here
 changes when you deploy; you just wrap it. **Set `ALLOWED_ORIGINS` to the tunnel hostname as part
-of that step** (see §7): a deployed server left blank allows every origin, which is exactly the
+of that step** (see §6): a deployed server left blank allows every origin, which is exactly the
 state the startup warning is telling you about.
 
 ---
@@ -1083,24 +1007,29 @@ state the startup warning is telling you about.
 ## Done when…
 
 - **Phase 0:** `go run .` serves `/healthz`, `POST /rides` mints a code, and a `loc` sent to
-  `/ws` comes back inside a `state` broadcast (step 10). Then the mobile app's own dot, fed
+  `/ws` comes back inside a `state` broadcast (step 9). Then the mobile app's own dot, fed
   through this server, proves the toolchain end to end (`docs/SYSTEM_DESIGN.md §11`).
 
 ### What's deliberately deferred
-- **`POST /rides/{code}/route`** — ORS cycling proxy + storing the polyline on the room (Phase 2).
+- **`POST /rides/{code}/route`** — ORS driving-car proxy + storing the polyline on the room (Phase 2).
 - **`POST /rides/{code}/voice-token`** — LiveKit JWT minting (Phase 3).
 - **Rejoin replace policy** — the stable `rider` id is plumbed through, but the room's
   `register` case must still kick the zombie connection (marked `TODO(rejoin)` in `room.go`).
-- **Windowed standings projection**, **empty-room GC**, **join-code validation/expiry**, and
-  **`wss://` + origin checks** — noted inline above; add as you harden past Phase 1.
+- **Empty-room GC**, **join-code validation/expiry**, and **`wss://` + origin checks** — noted
+  inline above; add as you harden past Phase 1.
+- **Supabase JWT verification middleware** — the Go server verifies (never mints) Supabase-issued
+  JWTs before trusting a caller's identity; not yet implemented (`docs/ADR/ADR-008.md`).
+- **Redacting `Authorization` in the logging middleware** — once JWTs flow through `/ws`, the
+  logging middleware (`internal/httpx/logging.go`) must not let a bearer token reach the log
+  stream unredacted (`docs/ADR/ADR-008.md`).
 - **WebSocket origin enforcement** — `upgrader.CheckOrigin` still returns `true` for every
-  request. The CORS wrapper in §6 covers the *HTTP* API only; CORS does not apply to a WebSocket
+  request. The CORS wrapper in §5 covers the *HTTP* API only; CORS does not apply to a WebSocket
   handshake, so `ALLOWED_ORIGINS` currently has no effect on `/ws`. Wiring the same allowlist into
   `CheckOrigin` is its own task, and it must land before the server is publicly reachable.
 - **Panic recovery for the hub's goroutines** — `Recover` covers the HTTP handler chain only.
   `Room.run`, `readPump` and `writePump` run outside it, and an unrecovered panic in *any*
   goroutine still terminates the process. Deliberately left to the tasks that rewrite that code.
-- **Hub-level shutdown** — see the note under §7 on close frames.
+- **Hub-level shutdown** — see the note under §6 on close frames.
 - **Hub lifecycle logging** — connect, disconnect, room create/destroy, dropped frame, malformed
   message and unknown ride code are not logged yet. The request log covers the HTTP edge; nothing
   inside `internal/hub` emits anything.
