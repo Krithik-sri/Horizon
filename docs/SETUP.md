@@ -108,10 +108,12 @@ npx expo install expo-location expo-task-manager
 
 ## 3. Map tiles — OpenFreeMap (nothing to configure)
 
-OpenFreeMap serves free MapLibre styles with no key, no signup, and no usage limits. Pick one:
-- `https://tiles.openfreemap.org/styles/liberty`
-- `https://tiles.openfreemap.org/styles/positron`
-- `https://tiles.openfreemap.org/styles/bright`
+OpenFreeMap serves free MapLibre styles with no key, no signup, and no usage limits.
+
+- `https://tiles.openfreemap.org/styles/dark` — **what Horizon uses.** Background `rgb(12,12,12)`,
+  which is the only one of these compatible with the Motion register's `#000000` surface and 7:1
+  contrast floor.
+- `liberty` · `positron` · `bright` — all light styles. Do not put these behind a Motion screen.
 
 That URL is the only "map config" you need. Attribution is added automatically by MapLibre.
 
@@ -270,34 +272,33 @@ await Location.startLocationUpdatesAsync(LOCATION_TASK, {
 
 ## 9. Map with rider markers — MapLibre + OpenFreeMap
 
-```tsx
-import { MapView, Camera, PointAnnotation, ShapeSource, LineLayer } from "@maplibre/maplibre-react-native";
+The working implementation is `mobile/src/features/convoy/` — read it there. Two things about
+this library are worth knowing before you write against it:
 
-const STYLE = "https://tiles.openfreemap.org/styles/liberty";
+**The component names changed in v11.** Most MapLibre-RN material online (and every rnmapbox
+snippet, which the API otherwise closely mirrors) uses `MapView` / `ShapeSource` / `LineLayer` /
+`PointAnnotation`. Version 11 renames them, and code written against the old names does not
+compile:
 
-function RideMap({ riders, route }: { riders: Rider[]; route?: [number, number][] }) {
-  return (
-    <MapView style={{ flex: 1 }} mapStyle={STYLE}>
-      <Camera followUserLocation followZoomLevel={14} />
+| Old / rnmapbox | `@maplibre/maplibre-react-native` v11 |
+|---|---|
+| `MapView` | `Map` |
+| `ShapeSource` | `GeoJSONSource` |
+| `LineLayer`, `CircleLayer`, … | `Layer` (with `LineLayerProps` etc.) |
+| `PointAnnotation` | `Marker` |
 
-      {route && (
-        <ShapeSource id="route" shape={{ type: "Feature", geometry: { type: "LineString", coordinates: route } }}>
-          <LineLayer id="routeLine" style={{ lineWidth: 4, lineColor: "#2b6cb0" }} />
-        </ShapeSource>
-      )}
+`Camera` keeps its name. When in doubt, read
+`node_modules/@maplibre/maplibre-react-native/lib/typescript/module/index.d.ts` — it is the
+authoritative list and takes ten seconds to check.
 
-      {riders.map((r) => (
-        <PointAnnotation key={r.id} id={r.id} coordinate={[r.lng, r.lat]}>
-          <RiderDot name={r.name} />
-        </PointAnnotation>
-      ))}
-    </MapView>
-  );
-}
-```
-> Riders carry no `pos` — there is no ranking to render ([`ADR-009`](./ADR/ADR-009.md)). The
-> MapLibre API is nearly identical to rnmapbox's, so most Mapbox RN snippets translate directly
-> — swap the import and use a style URL instead of a token.
+**Use the dark style, not `liberty`.** OpenFreeMap publishes a keyless dark style at
+`https://tiles.openfreemap.org/styles/dark` (background `rgb(12,12,12)`). The Motion register
+demands a `#000000` surface and a 7:1 contrast floor ([`docs/DESIGN.md`](./DESIGN.md)) — a light
+basemap breaks both, and is blinding at night. `liberty`, `bright`, and `positron` are all light.
+
+> Riders carry no `pos` — there is no ranking to render ([`ADR-009`](./ADR/ADR-009.md)).
+> Coordinates go to MapLibre as `[lng, lat]`; `route.polyline` already arrives in that order from
+> the server and must be passed through unswapped.
 
 ## 10. Directions — fetched via your backend (not the app)
 

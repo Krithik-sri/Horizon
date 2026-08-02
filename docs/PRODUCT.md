@@ -10,17 +10,11 @@ the disagreement gets recorded as an ADR.
 
 Horizon is a premium mobile companion for motorcycle riders.
 
-It is NOT another navigation app.
+It navigates. It keeps a convoy together. It helps plan a ride, and it remembers one.
 
-It is NOT another social network.
-
-It is NOT another fitness tracker.
-
-It is NOT trying to compete with Google Maps.
-
-Instead — Horizon exists for everything that happens between departure and arrival.
-
-Navigation apps optimize destinations. Horizon optimizes the riding experience.
+But it is built on a different premise from the maps you already have: a rider does not ride to
+arrive. Navigation apps optimize destinations. Horizon optimizes the ride — and getting you there
+is simply part of that.
 
 It is designed to become an invisible co-rider that quietly supports the rider without demanding
 attention.
@@ -44,6 +38,8 @@ If not — it does not belong.
 ---
 
 ## Product Position
+
+Horizon still gets you there — it just doesn't stop at that.
 
 | | |
 |---|---|
@@ -299,7 +295,7 @@ animations.
 
 ## Long-Term Vision
 
-**Today:** a premium riding companion.
+**Today:** navigation, convoy, and ride planning — a premium riding companion.
 
 **Tomorrow:** a complete ecosystem — ride planning, ride memories, convoy experiences, smart helmet
 integration, wearables, vehicle integrations, community.
@@ -310,9 +306,8 @@ Everything built around one principle: helping riders enjoy riding.
 
 ## What Horizon Is Not
 
-Not a navigation replacement. Not a motorcycle marketplace. Not a social media platform. Not a
-fitness app. Not another dashboard. Not a notification machine. Not a gamified experience. Not a
-concept project.
+Not a motorcycle marketplace. Not a social media platform. Not a fitness app. Not another
+dashboard. Not a notification machine. Not a gamified experience. Not a concept project.
 
 ---
 

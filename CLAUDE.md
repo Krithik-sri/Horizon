@@ -7,9 +7,10 @@ architecture is [`docs/SYSTEM_DESIGN.md`](docs/SYSTEM_DESIGN.md), setup is
 
 ## What this is
 
-**Horizon** — a premium native companion app for motorcycle riders. Not a navigation app: it
-exists for everything that happens *between* departure and arrival. It should feel like an
-invisible co-rider. Success is a rider saying *"I barely noticed Horizon was there."*
+**Horizon** — a premium native companion app for motorcycle riders. It navigates, keeps a convoy
+together, and covers everything that happens *between* departure and arrival — not just the
+arriving. It should feel like an invisible co-rider. Success is a rider saying *"I barely noticed
+Horizon was there."*
 
 `docs/PRODUCT.md` is the product's source of truth and outranks every technical document here.
 Read it before designing anything a rider sees.
@@ -95,8 +96,9 @@ docs/      all project documentation (index: docs/README.md)
 ## Status
 
 Early. `mobile/` is currently **empty of app code** — the Expo template was deleted in the v2
-pivot and the app is scaffolded fresh. The backend has a working WebSocket hub; route and voice
-are stubbed `501`.
+pivot and the app is scaffolded fresh. The backend has a hardened hub (reconnect-safe, reserved
+join codes, empty-room GC — `docs/ADR/ADR-010.md`) and a working ORS route proxy that pushes a
+`route` message to the room (`docs/ADR/ADR-011.md`). Voice remains stubbed `501`.
 
 Build order:
 0. App shell + design tokens; own dot on the map (Motion register).
@@ -150,8 +152,25 @@ Clients pass a stable per-session `rider` id on connect (`GET /ws?ride=…&name=
 reconnect replaces the old connection instead of adding a ghost rider; if absent the server mints
 one (the `welcome` id either way).
 
+Server → one client, once on join if the room has a stored route, and → all clients whenever a
+route is set or replaced:
+```json
+{ "type": "route", "ride": "ABC123",
+  "polyline": [[77.5946, 12.9716], [77.5951, 12.9720]],
+  "steps": [ { "instruction": "Turn right onto NH 44", "distance": 420.5,
+               "duration": 31.2, "type": 1, "name": "NH 44", "wayPoints": [12, 47] } ],
+  "summary": { "distance": 18240.3, "duration": 1620.7 } }
+```
+`polyline` is `[lng, lat]` — MapLibre/GeoJSON order, deliberately, the one place in the protocol
+that isn't named `lat`/`lng`. `wayPoints` are indices into `polyline`. `steps` and `summary` may
+be `null`. Rationale, and why this isn't a field on `state`: `docs/ADR/ADR-011.md`.
+
 HTTP: `POST /rides` (→ join code) · `POST /rides/{code}/route` (ORS proxy → polyline) ·
 `POST /rides/{code}/voice-token` (→ LiveKit JWT + url) · `GET /ws` · `GET /healthz`.
+
+A ride code must be minted by `POST /rides` before `/ws` will accept it — an unknown code gets
+**404** before the upgrade. Rooms (and their codes) are garbage-collected 5 minutes after the
+last rider leaves.
 
 ## Conventions & rules
 
@@ -173,7 +192,8 @@ HTTP: `POST /rides` (→ join code) · `POST /rides/{code}/route` (ORS proxy →
 ## Do / Don't
 
 - ✅ Keep the backend a single, deployable Go binary; in-memory rooms are fine at this scale.
-- ✅ Fetch a route once per ride through the backend (not per rider) to spare the ORS quota.
+- ✅ Store one route per ride through the backend, replaceable when it changes — never fetch one
+  per rider (`docs/ADR/ADR-011.md`).
 - ✅ Defer anything non-urgent to the Return register — that is the product, not a limitation.
 - ❌ Don't add a database or auth to the **Go** server — durable state is Supabase's job.
 - ❌ Don't reintroduce paid/card-required services (Mapbox, Google Maps, paid APIs).

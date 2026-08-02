@@ -37,13 +37,15 @@ Everything else goes straight to a branch. Most work does not need an ADR.
 |---|---|---|---|
 | [001](./ADR-001.md) | **Go, not Node**, for the realtime server | Accepted | Never, realistically — but if the team shrinks to zero Go familiarity |
 | [002](./ADR-002.md) | **WebSockets, not REST polling**, for live state | Accepted | Corporate proxies break long-lived sockets in practice |
-| [003](./ADR-003.md) | **OpenFreeMap**, not Google Maps or Mapbox, for tiles | Accepted | OpenFreeMap degrades, or a budget appears |
+| [003](./ADR-003.md) | **OpenFreeMap**, not Google Maps or Mapbox, for tiles | Accepted — amended by [011](./ADR-011.md) | OpenFreeMap degrades, or a budget appears |
 | [004](./ADR-004.md) | **PWA first**, native app later | Superseded by [ADR-007](./ADR-007.md) | Background location becomes a requirement, not a nice-to-have |
 | [005](./ADR-005.md) | **LiveKit** for voice, not custom WebRTC | Accepted | LiveKit's free tier changes, or usage outgrows it |
-| [006](./ADR-006.md) | **Zero paid services** as a hard constraint | Accepted | The project stops being a hobby project |
+| [006](./ADR-006.md) | **Zero paid services** as a hard constraint | Accepted — amended by [011](./ADR-011.md) | The project stops being a hobby project |
 | [007](./ADR-007.md) | **Native Android-first**; the PWA is cancelled | Accepted | The product walks back toward an install-free client |
 | [008](./ADR-008.md) | **Two backends**: Go for ephemeral realtime, Supabase for durable state | Accepted | Supabase Realtime's throughput improves, or convoy state needs to be durable |
 | [009](./ADR-009.md) | **No standings, no ranking** — the race indicator is removed | Accepted | Never — this follows directly from the No Gamification pillar |
+| [010](./ADR-010.md) | **One hub lock and one broadcast sweep**, not one goroutine per room | Accepted | Concurrent live rides reach the hundreds — shard the lock per room |
+| [011](./ADR-011.md) | **Navigation is a first-class capability** — route line + turn-by-turn, amending 003 and 006 | Accepted | Off-route rerouting, spoken guidance, or destination search become their own decisions |
 
 ## Template
 

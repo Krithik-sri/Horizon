@@ -1,0 +1,19 @@
+# Keep the build context to what `go build` actually needs.
+# Tests and fixtures don't belong in a deploy image; secrets never do.
+
+*_test.go
+wstest.mjs
+.env
+.env.*
+!.env.example
+
+# Local build output — the image builds its own.
+/server
+/server.exe
+*.exe
+*.test
+*.out
+coverage.*
+
+Dockerfile
+.dockerignore

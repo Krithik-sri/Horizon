@@ -2,6 +2,7 @@ export default {
   expo: {
     name: "Horizon",
     slug: "horizon",
+    scheme: "horizon",
     ios: {
       bundleIdentifier: "com.krithik.horizon",
       infoPlist: {

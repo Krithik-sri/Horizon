@@ -1,21 +1,74 @@
 package hub
 
 import (
+	"crypto/rand"
 	"encoding/json"
-	"math/rand"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
 
+const (
+	broadcastInterval = 250 * time.Millisecond // ~4 Hz
+
+	// roomGrace is how long an empty room survives before sweep collects it. Long
+	// enough that a convoy losing signal in a tunnel, or a rider who taps "start ride"
+	// and then spends a minute putting their gloves on, doesn't lose the room.
+	roomGrace = 5 * time.Minute
+
+	// maxCodeAttempts bounds CreateRide's collision retry. At 32^6 possible codes a
+	// collision is astronomically unlikely; an unbounded loop under the hub lock is
+	// still not a risk worth taking to cover a case that will never happen.
+	maxCodeAttempts = 10
+)
+
 type Hub struct {
-	mu    sync.RWMutex
+	// ponytail: one hub-wide lock, and broadcast marshals JSON while holding it. At ≤15
+	// riders per convoy and a handful of live rides that is microseconds per tick.
+	// Shard per-room if concurrent rides ever reach the hundreds.
+	mu    sync.Mutex
 	rooms map[string]*Room
 }
 
-func New() *Hub {
+// newHub builds the hub without the sweep goroutine, so tests can drive sweep()
+// deterministically instead of sleeping through the GC grace window. New() is the
+// production constructor.
+func newHub() *Hub {
 	return &Hub{rooms: make(map[string]*Room)}
+}
+
+func New() *Hub {
+	h := newHub()
+	go h.tick()
+	return h
+}
+
+// tick is the timer, sweep is the work. Kept separate so tests can call sweep with a
+// synthetic `now` instead of waiting on a real clock.
+func (h *Hub) tick() {
+	for now := range time.Tick(broadcastInterval) {
+		h.sweep(now)
+	}
+}
+
+// sweep broadcasts state to every room, then evicts rooms that have been empty for at
+// least roomGrace. Deleting from a map while ranging over it is safe in Go.
+func (h *Hub) sweep(now time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for code, r := range h.rooms {
+		// An empty room has nobody to send to, so skip the marshal entirely rather
+		// than building a state frame for no one four times a second for five minutes.
+		if len(r.riders) == 0 {
+			if now.Sub(r.emptySince) >= roomGrace {
+				delete(h.rooms, code)
+			}
+			continue
+		}
+		r.broadcast(now)
+	}
 }
 
 // Dev-only: accept any origin. Tighten before any public deployment.
@@ -25,24 +78,59 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin:     func(*http.Request) bool { return true },
 }
 
-// room returns the room for code, creating and starting it if needed.
-// TODO(later): garbage-collect empty rooms. Omitted in Phase 0 to keep the hub race-free
-// and easy to read; at ≤15 riders and a handful of rides, idle rooms are negligible.
-func (h *Hub) room(code string) *Room {
+// CreateRide mints a fresh join code and reserves the room for it right away — unlike
+// the old lazy-create scheme, a code returned from here is guaranteed to exist in
+// h.rooms, so a client presenting an unminted code to /ws is a genuine error rather
+// than "the room just hasn't been created yet".
+//
+// Retries on collision, bounded at maxCodeAttempts (see the const doc). If every
+// attempt collides, returns "" — unreachable in practice, but a caller must still
+// handle it rather than seat a rider in a room that doesn't exist.
+func (h *Hub) CreateRide() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i := 0; i < maxCodeAttempts; i++ {
+		code := genCode()
+		if _, exists := h.rooms[code]; !exists {
+			h.rooms[code] = &Room{code: code, riders: make(map[string]*Client), emptySince: time.Now()}
+			return code
+		}
+	}
+	return ""
+}
+
+// RideExists reports whether code is a currently live room. The route handler uses
+// this to fail fast — 404 before spending an ORS quota request — on a code that was
+// never minted or has since been GC'd, mirroring the same check ServeWS does below.
+func (h *Hub) RideExists(code string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, ok := h.rooms[code]
+	return ok
+}
+
+// SetRoute stores the route frame on the room and fans it out to everyone currently in
+// it, using the same non-blocking send broadcast uses — a slow client's full queue
+// drops the frame rather than stalling the hub. Returns false if the code is unknown
+// (the room may have been GC'd between the handler's existence check and this call).
+//
+// Deliberately does not touch emptySince or anything else about room lifecycle: setting
+// a route is not an occupancy event.
+func (h *Hub) SetRoute(code string, msg []byte) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	r, ok := h.rooms[code]
 	if !ok {
-		r = newRoom(code)
-		h.rooms[code] = r
-		go r.run()
+		return false
 	}
-	return r
-}
-
-// CreateRide mints a fresh join code. The room itself is created lazily on the first /ws join.
-func (h *Hub) CreateRide() string {
-	return genCode()
+	r.routeMsg = msg
+	for _, c := range r.riders {
+		select {
+		case c.send <- msg:
+		default: // client's queue is full — drop this frame rather than block the room
+		}
+	}
+	return true
 }
 
 func (h *Hub) ServeWS(w http.ResponseWriter, req *http.Request) {
@@ -51,6 +139,18 @@ func (h *Hub) ServeWS(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "missing ?ride=", http.StatusBadRequest)
 		return
 	}
+
+	// Reject an unknown code before upgrading. A real HTTP 404 tells the client far
+	// more than a socket that opens and immediately dies — and it's what makes ride
+	// codes mean something: only a code CreateRide actually minted can seat a rider.
+	h.mu.Lock()
+	_, known := h.rooms[code]
+	h.mu.Unlock()
+	if !known {
+		http.Error(w, "unknown ride code", http.StatusNotFound)
+		return
+	}
+
 	name := req.URL.Query().Get("name")
 	if name == "" {
 		name = "rider"
@@ -69,9 +169,9 @@ func (h *Hub) ServeWS(w http.ResponseWriter, req *http.Request) {
 		return // upgrader already wrote the HTTP error
 	}
 
-	room := h.room(code)
 	c := &Client{
-		room: room,
+		hub:  h,
+		code: code,
 		conn: conn,
 		send: make(chan []byte, 16),
 		id:   id,
@@ -79,15 +179,80 @@ func (h *Hub) ServeWS(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Tell the client its server-assigned id so it can pick its own dot out of the
-	// broadcast `state`. Additive to the contract; clients may ignore it. The send
-	// channel is buffered, so queuing this before the write pump starts can't block.
+	// broadcast `state`. Additive to the contract; clients may ignore it.
+	//
+	// Queued *before* c is seated, and that ordering is load-bearing: the moment the
+	// room holds a reference to c, a concurrent reconnect presenting the same rider id
+	// can evict it and close(c.send). Sending the welcome after that point would be a
+	// send on a closed channel. Here nothing else can reach c yet, and send is buffered,
+	// so this can neither race nor block.
 	if hello, err := json.Marshal(map[string]string{"type": "welcome", "id": c.id}); err == nil {
 		c.send <- hello
 	}
 
-	room.register <- c
+	h.mu.Lock()
+	room, known := h.rooms[code]
+	if !known {
+		// The room was GC'd by sweep while upgrader.Upgrade was blocked on the
+		// handshake. Nobody to seat the client into.
+		h.mu.Unlock()
+		conn.SetWriteDeadline(time.Now().Add(writeWait))
+		conn.WriteMessage(websocket.CloseMessage, []byte{})
+		conn.Close()
+		return
+	}
+
+	// A route already set on this room is queued right after welcome, for the same
+	// reason welcome is queued before c is seated: nothing can reach c yet, so this
+	// can neither race a concurrent SetRoute fan-out nor block — send is buffered at
+	// 16, and this is at most the second frame queued.
+	if room.routeMsg != nil {
+		c.send <- room.routeMsg
+	}
+
+	// Eviction — the ghost-rider fix. c.id is stable across reconnects, so a client
+	// already seated under the same id is a zombie connection from before a network
+	// drop (or a second device presenting the same id).
+	if old, exists := room.riders[c.id]; exists {
+		delete(room.riders, c.id)
+		close(old.send) // its writePump exits, closes the conn, which ends its readPump
+
+		// TODO(you): carry the old fix over, or not?
+		//   c.lat, c.lng, c.speed, c.lastSeen = old.lat, old.lng, old.speed, old.lastSeen
+		// Leaving this out means the rider vanishes from every other phone until their
+		// next GPS fix, because broadcast skips clients with a zero lastSeen. Carrying
+		// it over keeps the dot in place with a climbing ageSec instead. Product call
+		// (docs/PRODUCT.md, Confidence) — left for the repo owner.
+	}
+	room.riders[c.id] = c
+	h.mu.Unlock()
+
 	go c.writePump()
 	go c.readPump()
+}
+
+// remove drops c from its room, but only if c is still the client seated under its id.
+//
+// That identity check, not just the id, is the whole point. An evicted zombie's
+// readPump wakes up and runs this defer *after* the fresh connection is already seated
+// at riders[c.id]. Comparing only the id would delete the replacement — the
+// ghost-rider fix kicking the very rider it exists to save, intermittently and only
+// under the timing that reconnects produce. It also avoids a double close(c.send),
+// since eviction in ServeWS already closed the zombie's channel.
+func (h *Hub) remove(c *Client) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	r, ok := h.rooms[c.code]
+	if !ok {
+		return
+	}
+	if cur, ok := r.riders[c.id]; ok && cur == c {
+		delete(r.riders, c.id)
+		close(c.send)
+		if len(r.riders) == 0 {
+			r.emptySince = time.Now()
+		}
+	}
 }
 
 // --- small helpers ---
@@ -95,10 +260,20 @@ func (h *Hub) ServeWS(w http.ResponseWriter, req *http.Request) {
 // Ambiguity-free alphabet (no O/0, I/1) for human-shareable codes.
 const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
+// genCode and genID use crypto/rand rather than math/rand: these ids double as
+// unguessable tokens (there is no auth on /ws — a leaked code or rider id is all it
+// takes to sit in on someone's ride), so they need to not be predictable.
+//
+// Both alphabets divide 256 evenly (32 and 16), so taking a random byte mod
+// len(alphabet) is uniform with no bias and no rejection sampling needed. Since Go
+// 1.24, crypto/rand.Read no longer returns an error in practice (it blocks or panics
+// instead of failing), so its error return is ignored here rather than inventing a
+// dead error path.
 func genCode() string {
 	b := make([]byte, 6)
+	rand.Read(b)
 	for i := range b {
-		b[i] = codeAlphabet[rand.Intn(len(codeAlphabet))]
+		b[i] = codeAlphabet[int(b[i])%len(codeAlphabet)]
 	}
 	return string(b)
 }
@@ -106,8 +281,9 @@ func genCode() string {
 func genID() string {
 	const hex = "0123456789abcdef"
 	b := make([]byte, 8)
+	rand.Read(b)
 	for i := range b {
-		b[i] = hex[rand.Intn(16)]
+		b[i] = hex[int(b[i])%16]
 	}
 	return string(b)
 }

@@ -5,7 +5,7 @@ description: Use when building any rider-facing UI in Horizon — creating a scr
 
 # Horizon Design Rules
 
-Horizon is a premium native motorcycle companion, not a navigation app or a dashboard. The
+Horizon is a premium native motorcycle companion — it navigates, but it is never a dashboard. The
 rider's attention is sacred — nothing built here competes with the road. These are the rules
 too long for `CLAUDE.md` but mandatory whenever UI is built. They are judgment calls, not token
 values — for concrete colors, type scale, spacing, and motion timings see

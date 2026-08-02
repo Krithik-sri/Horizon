@@ -1,8 +1,9 @@
 # System Design — Horizon (native motorcycle companion app)
 
-> A premium native companion for motorcycle riders — not a navigation app, not a fitness
-> tracker, not a social network. It exists for everything that happens between departure and
-> arrival. Product intent is [`docs/PRODUCT.md`](./PRODUCT.md); this document is only the "how."
+> A premium native companion for motorcycle riders — not a fitness tracker, not a social
+> network. It navigates, keeps a convoy together, and covers everything else that happens
+> between departure and arrival. Product intent is [`docs/PRODUCT.md`](./PRODUCT.md); this
+> document is only the "how."
 
 **Status:** design / early build · **Target:** Android first, iOS later · **Voice:** live
 push-to-talk · **No paid accounts / no credit card required to build or run this.**
@@ -21,13 +22,17 @@ Every screen belongs to one of three registers ([`docs/PRODUCT.md`](./PRODUCT.md
 
 Live convoy tracking — everyone's position on a shared map — is one **Motion** feature among
 others, not the product itself. Everything convoy-shaped is a view on one thing: each rider's
-live coordinates, flowing through the Go server.
+live coordinates, flowing through the Go server. Navigation — a route line plus turn-by-turn
+maneuver cues — is another, alongside it, not a separate product
+([`ADR-011`](./ADR/ADR-011.md)).
 
 ### Non-goals
 - Any ranking or ordering of riders — no "who's ahead" ([`ADR-009`](./ADR/ADR-009.md)).
 - Gamification of any kind: badges, streaks, XP, levels, leaderboards.
 - A social graph beyond what Supabase Auth needs to own durable, per-rider data.
-- Full turn-by-turn navigation for every rider; a web client ([`ADR-007`](./ADR/ADR-007.md)).
+- A web client ([`ADR-007`](./ADR/ADR-007.md)).
+- Off-route rerouting, spoken guidance, and destination search — not yet decided
+  ([`ADR-011`](./ADR/ADR-011.md)).
 
 ---
 
@@ -116,9 +121,10 @@ memory, React Native = everything the rider sees.**
   pushed up the WebSocket; reconnects with backoff.
 - **Voice module** — a LiveKit room; push-to-talk publishes the mic only while held.
 - **Realtime backend (Go)** — one HTTP server upgrades `/ws?ride=…` after verifying the
-  Supabase JWT. One goroutine per join code owns its rider set, broadcasting a combined `state`
-  on a fixed **~4 Hz tick** decoupled from each rider's ~1 Hz ingest. A reconnect presenting the
-  same `rider` id replaces the stale connection instead of adding a ghost. See
+  Supabase JWT. A single hub lock guards every room's rider set; one sweep goroutine for the
+  whole process broadcasts each room's combined `state` on a fixed **~4 Hz tick**, decoupled from
+  each rider's ~1 Hz ingest ([`ADR-010`](./ADR/ADR-010.md)). A reconnect presenting the same
+  `rider` id replaces the stale connection instead of adding a ghost. See
   [`docs/SETUP_BACKEND.md`](./SETUP_BACKEND.md) for the implementation.
 - **Durable state (Supabase)** — sign-in, ride history, journal, photos, stats — populated in
   the **Return** register, never during Motion.

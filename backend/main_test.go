@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/krithik/horizon/backend/internal/hub"
+	"github.com/krithik/horizon/backend/internal/ors"
 )
 
 const testOrigin = "http://localhost:8081"
@@ -44,22 +45,54 @@ func (b *syncBuffer) String() string {
 // These are wiring tests. The individual middlewares are covered in internal/httpx;
 // what can only be verified here is that the composition works, which is precisely
 // where a ResponseWriter wrapper breaks WebSockets.
-func newTestServer(t *testing.T, origins []string) (*httptest.Server, *syncBuffer) {
+//
+// orsClient may be nil for tests that never touch the route endpoint — it falls back
+// to an unconfigured client (blank key), which is enough to keep buildHandler happy
+// without any test needing to know that.
+func newTestServer(t *testing.T, origins []string, orsClient *ors.Client) (*httptest.Server, *syncBuffer) {
 	t.Helper()
 	buf := &syncBuffer{}
 	logger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	srv := httptest.NewServer(buildHandler(logger, origins, hub.New()))
+	if orsClient == nil {
+		orsClient = ors.New("", nil)
+	}
+	srv := httptest.NewServer(buildHandler(logger, origins, hub.New(), orsClient))
 	t.Cleanup(srv.Close)
 	return srv, buf
+}
+
+// mintRideCode POSTs /rides and returns the code, so tests that dial /ws can use a
+// code the hub actually reserved. A hardcoded code 404s now that ride codes are a real
+// registry instead of whatever the first /ws client happened to type.
+func mintRideCode(t *testing.T, srv *httptest.Server, origin string) string {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/rides", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Origin", origin)
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("POST /rides: %v", err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding /rides response: %v", err)
+	}
+	return body.Code
 }
 
 // The regression this whole branch risks: a ResponseWriter wrapper that does not
 // implement http.Hijacker fails every WebSocket upgrade with "response does not
 // implement http.Hijacker", while leaving every HTTP-level test passing.
 func TestWebSocketUpgradeSurvivesMiddlewareChain(t *testing.T) {
-	srv, logs := newTestServer(t, []string{testOrigin})
+	srv, logs := newTestServer(t, []string{testOrigin}, nil)
+	code := mintRideCode(t, srv, testOrigin)
 
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ride=TEST01&name=auditor&rider=aud12345"
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ride=" + code + "&name=auditor&rider=aud12345"
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Origin": {testOrigin}})
 	if err != nil {
 		if resp != nil {
@@ -111,7 +144,7 @@ func TestWebSocketUpgradeSurvivesMiddlewareChain(t *testing.T) {
 }
 
 func TestCreateRideThroughChain(t *testing.T) {
-	srv, logs := newTestServer(t, []string{testOrigin})
+	srv, logs := newTestServer(t, []string{testOrigin}, nil)
 
 	req, err := http.NewRequest(http.MethodPost, srv.URL+"/rides", nil)
 	if err != nil {
@@ -159,7 +192,7 @@ func TestCreateRideThroughChain(t *testing.T) {
 }
 
 func TestPreflightThroughChain(t *testing.T) {
-	srv, _ := newTestServer(t, []string{testOrigin})
+	srv, _ := newTestServer(t, []string{testOrigin}, nil)
 
 	req, err := http.NewRequest(http.MethodOptions, srv.URL+"/rides/ABC123/route", nil)
 	if err != nil {
@@ -186,7 +219,7 @@ func TestPreflightThroughChain(t *testing.T) {
 }
 
 func TestHealthzThroughChain(t *testing.T) {
-	srv, _ := newTestServer(t, nil)
+	srv, _ := newTestServer(t, nil, nil)
 
 	resp, err := srv.Client().Get(srv.URL + "/healthz")
 	if err != nil {

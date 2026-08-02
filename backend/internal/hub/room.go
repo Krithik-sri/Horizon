@@ -3,11 +3,8 @@ package hub
 import (
 	"encoding/json"
 	"sort"
-	"sync"
 	"time"
 )
-
-const broadcastInterval = 250 * time.Millisecond // ~4 Hz
 
 // riderState is one entry in the server → clients message (docs/SYSTEM_DESIGN.md §6).
 //
@@ -28,70 +25,28 @@ type stateMsg struct {
 	Riders []riderState `json:"riders"`
 }
 
+// Room is plain data — there is no per-room goroutine or lock. Every field is guarded
+// by Hub.mu; see the ponytail note there for why one hub-wide lock is fine at this
+// scale.
 type Room struct {
-	code  string
-	mu    sync.RWMutex
-	rider map[*Client]bool
-
-	register   chan *Client
-	unregister chan *Client
+	code       string
+	riders     map[string]*Client // keyed by rider id — this is the ghost-rider fix
+	emptySince time.Time          // only meaningful while riders is empty
+	routeMsg   []byte             // marshalled `route` frame, nil until a route is set; guarded by Hub.mu
 }
 
-func newRoom(code string) *Room {
-	return &Room{
-		code:       code,
-		rider:      make(map[*Client]bool),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-	}
-}
-
-func (r *Room) run() {
-	ticker := time.NewTicker(broadcastInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case c := <-r.register:
-			r.mu.Lock()
-			// Rejoin policy: c.id is stable across reconnects (hub.go), so a client
-			// already seated with the same id is a zombie connection from before a
-			// network drop (or a second device presenting the same id).
-			//
-			// TODO(rejoin): decide what happens to it. Under this lock you can:
-			//   1. find any existing old *Client in r.rider with old.id == c.id
-			//   2. kick it — delete(r.rider, old) + close(old.send), exactly like
-			//      the unregister case (its pumps then shut down on their own)
-			//   3. optionally carry its last fix over (old.lat/lng/speed/lastSeen → c)
-			//      so the rider's dot unfreezes instead of vanishing until the next fix
-			// Until this is implemented, a reconnecting rider appears twice for up to
-			// ~60s (pongWait, client.go) — the ghost-rider bug.
-			r.rider[c] = true
-			r.mu.Unlock()
-		case c := <-r.unregister:
-			r.mu.Lock()
-			if _, ok := r.rider[c]; ok {
-				delete(r.rider, c)
-				close(c.send)
-			}
-			r.mu.Unlock()
-		case <-ticker.C:
-			r.broadcast()
-		}
-	}
-}
-
-func (r *Room) broadcast() {
-	now := time.Now()
-	r.mu.RLock()
-	riders := make([]riderState, 0, len(r.rider))
-	for c := range r.rider {
+// broadcast marshals the room's current state once and fans it out to every rider.
+// The caller (Hub.sweep) holds h.mu for the duration, so broadcast does no locking of
+// its own. now is passed in rather than read from time.Now() so tests can drive it.
+func (r *Room) broadcast(now time.Time) {
+	riders := make([]riderState, 0, len(r.riders))
+	for _, c := range r.riders {
 		if c.lastSeen.IsZero() {
 			continue // hasn't sent a fix yet — don't draw a dot at (0,0)
 		}
 		riders = append(riders, riderState{ID: c.id, Name: c.name, Lat: c.lat, Lng: c.lng,
 			Speed: c.speed, AgeSec: int(now.Sub(c.lastSeen).Seconds())})
 	}
-	r.mu.RUnlock()
 
 	// Stable order by id so the client's list doesn't jitter between frames.
 	// Not a ranking — see riderState.
@@ -101,12 +56,10 @@ func (r *Room) broadcast() {
 	if err != nil {
 		return
 	}
-	r.mu.RLock()
-	for c := range r.rider {
+	for _, c := range r.riders {
 		select {
 		case c.send <- msg:
 		default: // client's queue is full — drop this frame rather than block the room
 		}
 	}
-	r.mu.RUnlock()
 }

@@ -8,9 +8,11 @@
 > route proxy. Durable state (auth, ride history, journal, photos) belongs to Supabase, not this
 > server — see `docs/ADR/ADR-008.md` for the split.
 >
-> **Phase 0 scope (this guide):** `GET /healthz`, `POST /rides` (mint a join code), and
+> **Phase 0 scope (this guide):** `GET /healthz`, `POST /rides` (reserve a join code), and
 > `GET /ws` (the location in/out pipe). The route proxy and voice-token endpoints are
-> scaffolded as `501 Not Implemented` stubs — you fill them in Phase 2 / Phase 3.
+> The route proxy is now implemented (`POST /rides/{code}/route` → ORS → a `route` message
+> broadcast to the room, `docs/ADR/ADR-011.md`); the voice-token endpoint is still a
+> `501 Not Implemented` stub you fill in Phase 3.
 >
 > No paid accounts, no credit card. The only secrets (LiveKit, ORS) come later and live **only**
 > here on the backend, never in the app.
@@ -70,24 +72,12 @@ One `Client` per WebSocket. The **read pump** parses `loc` messages and stamps t
 last-seen with the **server's** receive time (don't trust the phone's clock for staleness). The
 **write pump** drains a buffered `send` channel and keeps the socket alive with pings.
 
+The implementation is `backend/internal/hub/client.go` — read it there. What follows is why it
+looks the way it does.
+
+The wire shape of what a rider sends, unchanged since Phase 0:
+
 ```go
-package hub
-
-import (
-	"encoding/json"
-	"time"
-
-	"github.com/gorilla/websocket"
-)
-
-const (
-	writeWait      = 10 * time.Second
-	pongWait       = 60 * time.Second
-	pingPeriod     = (pongWait * 9) / 10
-	maxMessageSize = 1024
-)
-
-// locMsg is the client → server message (CLAUDE.md / docs/SYSTEM_DESIGN.md §6).
 type locMsg struct {
 	Type    string  `json:"type"`
 	Lat     float64 `json:"lat"`
@@ -96,100 +86,28 @@ type locMsg struct {
 	Speed   float64 `json:"speed"`
 	Ts      int64   `json:"ts"`
 }
-
-type Client struct {
-	room *Room
-	conn *websocket.Conn
-	send chan []byte
-	id   string
-	name string
-
-	// Latest fix — guarded by room.mu.
-	lat      float64
-	lng      float64
-	speed    float64
-	lastSeen time.Time // server receive time; zero until the first loc arrives
-}
-
-func (c *Client) readPump() {
-	defer func() {
-		c.room.unregister <- c
-		c.conn.Close()
-	}()
-	c.conn.SetReadLimit(maxMessageSize)
-	c.conn.SetReadDeadline(time.Now().Add(pongWait))
-	c.conn.SetPongHandler(func(string) error {
-		c.conn.SetReadDeadline(time.Now().Add(pongWait))
-		return nil
-	})
-
-	for {
-		_, data, err := c.conn.ReadMessage()
-		if err != nil {
-			return
-		}
-		var m locMsg
-		if err := json.Unmarshal(data, &m); err != nil || m.Type != "loc" {
-			continue // ignore anything that isn't a well-formed loc
-		}
-		c.room.mu.Lock()
-		c.lat, c.lng, c.speed = m.Lat, m.Lng, m.Speed
-		c.lastSeen = time.Now()
-		c.room.mu.Unlock()
-	}
-}
-
-func (c *Client) writePump() {
-	ticker := time.NewTicker(pingPeriod)
-	defer func() {
-		ticker.Stop()
-		c.conn.Close()
-	}()
-	for {
-		select {
-		case msg, ok := <-c.send:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if !ok { // room closed our channel
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
-				return
-			}
-			if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-				return
-			}
-		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				return
-			}
-		}
-	}
-}
 ```
+
+The `writeWait`/`pongWait`/`pingPeriod`/`maxMessageSize` reasoning is covered together with the
+`http.Server` timeouts they complement — see *Server timeouts* under §5.
 
 ---
 
 ## 3. The room — `backend/internal/hub/room.go`
 
-One `Room` per join code, owned by a single goroutine (`run`). All mutation of the rider set
-goes through its `register`/`unregister` channels, and it **broadcasts on a fixed ~4 Hz tick**
-rather than on every incoming `loc` (decouples fan-out from ingest — `docs/SYSTEM_DESIGN.md §8`).
+One `Room` per join code. Since `docs/ADR/ADR-010.md`, a `Room` is plain data — no goroutine and
+no `register`/`unregister` channels of its own; a single sweep goroutine on the `Hub` (§4) owns
+every room's rider set instead. What hasn't changed: state still **broadcasts on a fixed ~4 Hz
+tick** rather than on every incoming `loc` (decouples fan-out from ingest —
+`docs/SYSTEM_DESIGN.md §8`).
+
+The implementation is `backend/internal/hub/room.go` — read it there, alongside
+`backend/internal/hub/hub.go` (§4), which now owns the sweep that calls into it. What follows is
+why it looks the way it does.
+
+The wire shape of what the room sends back, unchanged since Phase 0:
 
 ```go
-package hub
-
-import (
-	"encoding/json"
-	"sort"
-	"sync"
-	"time"
-)
-
-const broadcastInterval = 250 * time.Millisecond // ~4 Hz
-
-// riderState is one entry in the server → clients message (docs/SYSTEM_DESIGN.md §6).
-//
-// Deliberately carries no position/rank: Horizon does not rank riders
-// (docs/ADR/ADR-009.md, "No Gamification" in docs/PRODUCT.md).
 type riderState struct {
 	ID     string  `json:"id"`
 	Name   string  `json:"name"`
@@ -204,90 +122,17 @@ type stateMsg struct {
 	Ride   string       `json:"ride"`
 	Riders []riderState `json:"riders"`
 }
-
-type Room struct {
-	code  string
-	mu    sync.RWMutex
-	rider map[*Client]bool
-
-	register   chan *Client
-	unregister chan *Client
-}
-
-func newRoom(code string) *Room {
-	return &Room{
-		code:       code,
-		rider:      make(map[*Client]bool),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-	}
-}
-
-func (r *Room) run() {
-	ticker := time.NewTicker(broadcastInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case c := <-r.register:
-			r.mu.Lock()
-			// Rejoin policy: c.id is stable across reconnects (hub.go), so a client
-			// already seated with the same id is a zombie connection from before a
-			// network drop (or a second device presenting the same id).
-			//
-			// TODO(rejoin): decide what happens to it. Under this lock you can:
-			//   1. find any existing old *Client in r.rider with old.id == c.id
-			//   2. kick it — delete(r.rider, old) + close(old.send), exactly like
-			//      the unregister case (its pumps then shut down on their own)
-			//   3. optionally carry its last fix over (old.lat/lng/speed/lastSeen → c)
-			//      so the rider's dot unfreezes instead of vanishing until the next fix
-			// Until this is implemented, a reconnecting rider appears twice for up to
-			// ~60s (pongWait, client.go) — the ghost-rider bug.
-			r.rider[c] = true
-			r.mu.Unlock()
-		case c := <-r.unregister:
-			r.mu.Lock()
-			if _, ok := r.rider[c]; ok {
-				delete(r.rider, c)
-				close(c.send)
-			}
-			r.mu.Unlock()
-		case <-ticker.C:
-			r.broadcast()
-		}
-	}
-}
-
-func (r *Room) broadcast() {
-	now := time.Now()
-	r.mu.RLock()
-	riders := make([]riderState, 0, len(r.rider))
-	for c := range r.rider {
-		if c.lastSeen.IsZero() {
-			continue // hasn't sent a fix yet — don't draw a dot at (0,0)
-		}
-		riders = append(riders, riderState{ID: c.id, Name: c.name, Lat: c.lat, Lng: c.lng,
-			Speed: c.speed, AgeSec: int(now.Sub(c.lastSeen).Seconds())})
-	}
-	r.mu.RUnlock()
-
-	// Stable order by id so the client's list doesn't jitter between frames.
-	// Not a ranking — see riderState.
-	sort.Slice(riders, func(i, j int) bool { return riders[i].ID < riders[j].ID })
-
-	msg, err := json.Marshal(stateMsg{Type: "state", Ride: r.code, Riders: riders})
-	if err != nil {
-		return
-	}
-	r.mu.RLock()
-	for c := range r.rider {
-		select {
-		case c.send <- msg:
-		default: // client's queue is full — drop this frame rather than block the room
-		}
-	}
-	r.mu.RUnlock()
-}
 ```
+
+Building that `riders` slice on every tick makes three deliberate choices:
+
+- A rider with a zero `lastSeen` — hasn't sent a fix yet — is skipped, so nobody's dot is drawn at
+  `(0, 0)`.
+- The slice is sorted by id before marshaling, purely so the client's list doesn't jitter between
+  frames. That is **not** a ranking — Horizon does not rank riders (`docs/ADR/ADR-009.md`,
+  "No Gamification" in `docs/PRODUCT.md`).
+- Sending to a client's `send` channel is non-blocking: if that client's 16-slot buffer is full,
+  this frame is dropped for them rather than stalling the whole room on one slow socket.
 
 ---
 
@@ -295,364 +140,47 @@ func (r *Room) broadcast() {
 
 Owns the room map and upgrades incoming `/ws` requests. Each new client is greeted with a
 one-time `welcome` message carrying its id (so it can pick its own dot out of `state`), and
-may present a stable `?rider=` id so a reconnect replaces its old connection.
+may present a stable `?rider=` id so a reconnect replaces its old connection. A missing
+`?ride=` is still **400**; an unminted, expired, or otherwise unknown code is now rejected with
+**404 `unknown ride code`** before the upgrade (`docs/ADR/ADR-010.md`).
+
+The implementation is `backend/internal/hub/hub.go` — read it there. What follows is why it looks
+the way it does.
+
+`docs/ADR/ADR-010.md` covers the concurrency model in full: one `sync.Mutex` on the `Hub` guards
+every room's rider map *and* every client's latest fix — there is exactly one lock in
+`internal/hub` now, not one per room plus a second one inside it — and a single sweep goroutine,
+started once when the process boots, replaces every per-room goroutine:
 
 ```go
-package hub
+const (
+	broadcastInterval = 250 * time.Millisecond // ~4 Hz
 
-import (
-	"encoding/json"
-	"math/rand"
-	"net/http"
-	"sync"
-
-	"github.com/gorilla/websocket"
+	// roomGrace is how long an empty room survives before sweep collects it — long
+	// enough that a convoy losing signal in a tunnel doesn't lose the room.
+	roomGrace = 5 * time.Minute
 )
-
-type Hub struct {
-	mu    sync.RWMutex
-	rooms map[string]*Room
-}
-
-func New() *Hub {
-	return &Hub{rooms: make(map[string]*Room)}
-}
-
-// Dev-only: accept any origin. Tighten before any public deployment.
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin:     func(*http.Request) bool { return true },
-}
-
-// room returns the room for code, creating and starting it if needed.
-// TODO(later): garbage-collect empty rooms. Omitted in Phase 0 to keep the hub race-free
-// and easy to read; at ≤15 riders and a handful of rides, idle rooms are negligible.
-func (h *Hub) room(code string) *Room {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	r, ok := h.rooms[code]
-	if !ok {
-		r = newRoom(code)
-		h.rooms[code] = r
-		go r.run()
-	}
-	return r
-}
-
-// CreateRide mints a fresh join code. The room itself is created lazily on the first /ws join.
-func (h *Hub) CreateRide() string {
-	return genCode()
-}
-
-func (h *Hub) ServeWS(w http.ResponseWriter, req *http.Request) {
-	code := req.URL.Query().Get("ride")
-	if code == "" {
-		http.Error(w, "missing ?ride=", http.StatusBadRequest)
-		return
-	}
-	name := req.URL.Query().Get("name")
-	if name == "" {
-		name = "rider"
-	}
-
-	// Optional stable rider id, kept by the client across reconnects (mobile networks
-	// drop — CLAUDE.md). Presenting the same id lets the room replace the stale
-	// connection instead of seating a duplicate "ghost" rider. Absent/invalid → minted.
-	id := req.URL.Query().Get("rider")
-	if !validRiderID(id) {
-		id = genID()
-	}
-
-	conn, err := upgrader.Upgrade(w, req, nil)
-	if err != nil {
-		return // upgrader already wrote the HTTP error
-	}
-
-	room := h.room(code)
-	c := &Client{
-		room: room,
-		conn: conn,
-		send: make(chan []byte, 16),
-		id:   id,
-		name: name,
-	}
-
-	// Tell the client its server-assigned id so it can pick its own dot out of the
-	// broadcast `state`. Additive to the contract; clients may ignore it. The send
-	// channel is buffered, so queuing this before the write pump starts can't block.
-	if hello, err := json.Marshal(map[string]string{"type": "welcome", "id": c.id}); err == nil {
-		c.send <- hello
-	}
-
-	room.register <- c
-	go c.writePump()
-	go c.readPump()
-}
-
-// --- small helpers ---
-
-// Ambiguity-free alphabet (no O/0, I/1) for human-shareable codes.
-const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-
-func genCode() string {
-	b := make([]byte, 6)
-	for i := range b {
-		b[i] = codeAlphabet[rand.Intn(len(codeAlphabet))]
-	}
-	return string(b)
-}
-
-func genID() string {
-	const hex = "0123456789abcdef"
-	b := make([]byte, 8)
-	for i := range b {
-		b[i] = hex[rand.Intn(16)]
-	}
-	return string(b)
-}
-
-// validRiderID accepts client-supplied ids shaped like crypto.randomUUID() output:
-// 8–64 chars of [A-Za-z0-9_-]. Anything else falls back to a server-minted id.
-func validRiderID(s string) bool {
-	if len(s) < 8 || len(s) > 64 {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_':
-		default:
-			return false
-		}
-	}
-	return true
-}
 ```
 
-> `math/rand`'s global source is auto-seeded on Go 1.20+, so codes differ each run. These codes
-> are fine for a friend group; note that anyone holding a code can join (a bearer token). Real
-> validation/expiry is a later concern.
+On each tick, `sweep` broadcasts to every non-empty room exactly as the old per-room `run` loop
+did, then deletes any room that's been empty for `roomGrace` — including a code nobody ever
+joined, since a freshly created room is empty from the start.
+
+> Codes and rider ids come from `crypto/rand`, not `math/rand`. `CreateRide` reserves the code by
+> creating its (empty) room under the hub lock before returning it, so `POST /rides` is no longer
+> decorative — a client can only join a code that was actually minted, and `POST /rides` returns
+> **503** on the (statistically tiny) chance the 6-character space is exhausted. A code stops
+> working 5 minutes after its room empties — including a code nobody ever joined — because the
+> room is garbage-collected and the code goes with it (`docs/ADR/ADR-010.md`). These codes are
+> still a bearer token, not an auth boundary: anyone holding one can join.
 
 ---
 
 ## 5. Wiring it up — `backend/main.go`
 
-```go
-package main
-
-import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"log/slog"
-	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
-
-	"github.com/krithik/horizon/backend/internal/httpx"
-	"github.com/krithik/horizon/backend/internal/hub"
-)
-
-// Server lifecycle timings.
-//
-// Only two of the four http.Server timeouts are set, and the two that are left at zero
-// are the interesting decision — see the http.Server literal in run() for why.
-const (
-	// Slow-loris defence: a client that opens a connection and dribbles headers holds
-	// a goroutine until it is bounded. Harmless to WebSockets, whose headers arrive in
-	// the first packet like any other request's.
-	readHeaderTimeout = 5 * time.Second
-
-	// Bounds idle keep-alive connections between requests. Does not apply to a
-	// WebSocket: once gorilla hijacks the connection it leaves the server's management
-	// entirely, and liveness is the ping/pong in internal/hub/client.go from then on.
-	idleTimeout = 120 * time.Second
-
-	// How long Shutdown may drain before we stop waiting. Comfortably inside the ~30s
-	// most platforms allow between SIGTERM and SIGKILL.
-	shutdownGrace = 15 * time.Second
-)
-
-func main() {
-	if err := run(); err != nil {
-		// run() has already logged the detail through slog.
-		os.Exit(1)
-	}
-}
-
-func run() error {
-	logger, levelErr := newLogger(os.Getenv("LOG_LEVEL"))
-	if levelErr != nil {
-		logger.Warn("invalid LOG_LEVEL, defaulting to info", "err", levelErr)
-	}
-
-	// Read once, at startup: a misconfiguration surfaces at boot rather than on a
-	// rider's phone, and the request path does no parsing.
-	origins := httpx.ParseOrigins(os.Getenv("ALLOWED_ORIGINS"))
-	if len(origins) == 0 {
-		logger.Warn("ALLOWED_ORIGINS is not set — every origin is allowed; " +
-			"set it to a comma-separated list of origins before deploying")
-	} else {
-		logger.Info("CORS configured", "origins", origins)
-	}
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	srv := &http.Server{
-		Addr:    ":" + port,
-		Handler: buildHandler(logger, origins, hub.New()),
-
-		ReadHeaderTimeout: readHeaderTimeout,
-		IdleTimeout:       idleTimeout,
-
-		// ReadTimeout and WriteTimeout are deliberately left at 0 (no limit), and
-		// setting them is the most likely way to break this server.
-		//
-		// Both are absolute deadlines armed when the request begins, not idle
-		// timeouts. On a WebSocket that lives for a whole bike ride, either one would
-		// kill the connection the moment it elapsed — presenting as "riders vanish
-		// after exactly N seconds", which is a miserable thing to diagnose from a
-		// bicycle. The pumps in internal/hub/client.go already bound both directions
-		// at the right granularity: a 60s read deadline refreshed by pong, and a 10s
-		// write deadline set before every individual write.
-		//
-		// If you are here to harden the server, ReadHeaderTimeout above is the field
-		// that gives slow-loris protection without touching long-lived connections.
-
-		// Route net/http's own internal errors into the structured stream instead of
-		// letting them reach stderr unformatted.
-		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
-	}
-
-	// SIGTERM is what a container platform sends; os.Interrupt is Ctrl+C in dev. Note
-	// that Windows never really delivers SIGTERM, so the drain path below is only
-	// genuinely exercised on the Linux deployment target.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	serveErr := make(chan error, 1)
-	go func() {
-		// Shutdown makes ListenAndServe return ErrServerClosed. That is the success
-		// path, not a failure — reporting it would make every clean stop look like a
-		// crash to whatever is supervising the process.
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			serveErr <- err
-			return
-		}
-		serveErr <- nil
-	}()
-
-	logger.Info("server started", "addr", srv.Addr)
-
-	select {
-	case err := <-serveErr:
-		if err != nil {
-			logger.Error("server failed", "err", err)
-			return err
-		}
-		return nil
-
-	case <-ctx.Done():
-		// Restore default signal handling first, so a second Ctrl+C from an impatient
-		// operator kills the process immediately instead of being swallowed.
-		stop()
-		logger.Info("shutdown signal received, draining", "grace", shutdownGrace)
-
-		sctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
-		defer cancel()
-
-		// Shutdown stops accepting, then waits for active requests to finish. It does
-		// not close hijacked connections, so live WebSockets are not sent a close
-		// frame here — they are simply cut when the process exits. Delivering close
-		// frames needs a hub-level teardown and a way for Room.run to exit, which is
-		// the room-lifecycle task's territory (HZ-012), not this one.
-		if err := srv.Shutdown(sctx); err != nil {
-			logger.Error("graceful shutdown did not complete", "err", err)
-			return err
-		}
-
-		logger.Info("shutdown complete")
-		return nil
-	}
-}
-
-// newLogger builds the process logger from a LOG_LEVEL value.
-//
-// JSON to stderr, so logs stay machine-readable and stdout stays free. An unparseable
-// level is not fatal: the server starts at info and says so, because refusing to boot
-// over a typo in an observability setting would be a worse failure than the typo.
-//
-// Levels: debug, info, warn, error (case-insensitive). Default info.
-//
-// LOG_LEVEL=debug is the only level at which rider coordinates may be logged, and it
-// must never be enabled in a deployed build — location is the most sensitive data class
-// in this app (docs/SYSTEM_DESIGN.md, "Security & privacy").
-func newLogger(raw string) (*slog.Logger, error) {
-	level := slog.LevelInfo
-	var parseErr error
-	if raw != "" {
-		if err := level.UnmarshalText([]byte(raw)); err != nil {
-			level = slog.LevelInfo
-			parseErr = fmt.Errorf("LOG_LEVEL %q: %w", raw, err)
-		}
-	}
-	handler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level})
-	return slog.New(handler), parseErr
-}
-
-// buildHandler registers the routes and wraps them in the middleware chain.
-//
-// Extracted from run() so that main_test.go can exercise the exact chain the server
-// runs — a WebSocket upgrade only proves anything if it goes through every wrapper.
-//
-// Order is Recover → Log → CORS → mux:
-//   - Recover outermost, so a panic in any other middleware is caught too.
-//   - Log outside CORS, so preflights are visible; CORS answers those itself and the
-//     mux never sees them.
-//   - CORS wrapping the whole mux, so /ws and every route added later inherit the
-//     policy without anyone remembering to.
-//
-// A per-IP rate limiter, when it lands, goes inside CORS so that a preflight is never
-// rate-limited.
-func buildHandler(logger *slog.Logger, origins []string, h *hub.Hub) http.Handler {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
-	})
-
-	mux.HandleFunc("GET /ws", h.ServeWS)
-
-	mux.HandleFunc("POST /rides", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, map[string]string{"code": h.CreateRide()})
-	})
-
-	// Phase 2: proxy a route to OpenRouteService (driving-car profile — ORS has no motorcycle
-	// profile), store the polyline on the room.
-	mux.HandleFunc("POST /rides/{code}/route", notImplemented)
-	// Phase 3: mint a LiveKit JWT for this rider + room.
-	mux.HandleFunc("POST /rides/{code}/voice-token", notImplemented)
-
-	return httpx.Recover(logger)(httpx.Log(logger)(httpx.CORS(origins)(mux)))
-}
-
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
-}
-
-func notImplemented(w http.ResponseWriter, _ *http.Request) {
-	http.Error(w, "not implemented yet", http.StatusNotImplemented)
-}
-```
+Assembles the hub, the middleware chain (below), and the routes into one `http.Server`, and owns
+process lifecycle: startup, structured logging, and graceful shutdown on `SIGINT`/`SIGTERM`. The
+implementation is `backend/main.go` — read it there. What follows is why it looks the way it does.
 
 ### The middleware chain
 
@@ -759,6 +287,11 @@ LIVEKIT_URL=
 
 # OpenRouteService (Phase 2 — driving-car profile; ORS has no motorcycle profile). Server-side only.
 ORS_API_KEY=
+
+# Supabase. The Go server verifies tokens Supabase issues — it never mints identity and
+# never talks to Postgres (docs/ADR/ADR-008.md). Server-side only, never in the app.
+SUPABASE_URL=
+SUPABASE_JWT_SECRET=
 ```
 
 ### `ALLOWED_ORIGINS`
@@ -889,9 +422,10 @@ explicitly *not* treated as a failure — reporting it would make every clean sh
 crash to whatever supervises the process.
 
 > Note: `srv.Shutdown` does not close hijacked connections, so live WebSockets are **not** sent a
-> close frame — they are cut when the process exits. Delivering close frames needs a hub-level
-> teardown and an exit path for `Room.run`, which belongs to the room-lifecycle work, not here.
-> On Windows `SIGTERM` is never really delivered, so only Ctrl+C exercises this path locally.
+> close frame — they are cut when the process exits. Sending close frames on shutdown would need
+> the hub to enumerate and close every live connection itself, which is still unimplemented
+> (`docs/ADR/ADR-010.md`). On Windows `SIGTERM` is never really delivered, so only Ctrl+C exercises
+> this path locally.
 
 ---
 
@@ -1013,10 +547,8 @@ state the startup warning is telling you about.
 ### What's deliberately deferred
 - **`POST /rides/{code}/route`** — ORS driving-car proxy + storing the polyline on the room (Phase 2).
 - **`POST /rides/{code}/voice-token`** — LiveKit JWT minting (Phase 3).
-- **Rejoin replace policy** — the stable `rider` id is plumbed through, but the room's
-  `register` case must still kick the zombie connection (marked `TODO(rejoin)` in `room.go`).
-- **Empty-room GC**, **join-code validation/expiry**, and **`wss://` + origin checks** — noted
-  inline above; add as you harden past Phase 1.
+- **`wss://` in production** — the dev server still speaks plaintext `ws://`; switching to TLS is
+  a deployment step (see *Deployment later*, below), not something `docs/ADR/ADR-010.md` touches.
 - **Supabase JWT verification middleware** — the Go server verifies (never mints) Supabase-issued
   JWTs before trusting a caller's identity; not yet implemented (`docs/ADR/ADR-008.md`).
 - **Redacting `Authorization` in the logging middleware** — once JWTs flow through `/ws`, the
@@ -1026,10 +558,10 @@ state the startup warning is telling you about.
   request. The CORS wrapper in §5 covers the *HTTP* API only; CORS does not apply to a WebSocket
   handshake, so `ALLOWED_ORIGINS` currently has no effect on `/ws`. Wiring the same allowlist into
   `CheckOrigin` is its own task, and it must land before the server is publicly reachable.
-- **Panic recovery for the hub's goroutines** — `Recover` covers the HTTP handler chain only.
-  `Room.run`, `readPump` and `writePump` run outside it, and an unrecovered panic in *any*
-  goroutine still terminates the process. Deliberately left to the tasks that rewrite that code.
-- **Hub-level shutdown** — see the note under §6 on close frames.
+- **Panic recovery for the hub's goroutines** — `Recover` covers the HTTP handler chain only. The
+  sweep goroutine, `readPump`, and `writePump` run outside it, and an unrecovered panic in *any*
+  goroutine still terminates the process (`docs/ADR/ADR-010.md`).
+- **Hub-level shutdown** — see the graceful-shutdown note under §5 on close frames.
 - **Hub lifecycle logging** — connect, disconnect, room create/destroy, dropped frame, malformed
   message and unknown ride code are not logged yet. The request log covers the HTTP edge; nothing
   inside `internal/hub` emits anything.

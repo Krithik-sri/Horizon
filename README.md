@@ -1,8 +1,8 @@
 # Horizon 🏍️
 
-A premium native companion for motorcycle riders — not a navigation app. Horizon exists for
-everything that happens between departure and arrival: it stays quiet while you ride, shows
-only what's essential, and gives the rest back to you when you stop. See
+A premium native companion for motorcycle riders. It navigates, keeps a convoy together, and
+covers everything else that happens between departure and arrival: it stays quiet while you
+ride, shows only what's essential, and gives the rest back to you when you stop. See
 [`docs/PRODUCT.md`](./docs/PRODUCT.md) for the full vision.
 
 - **App:** React Native + Expo (dev client), TypeScript — Android first, iOS later (`mobile/`)
@@ -39,7 +39,7 @@ horizon/
 │   ├── SETUP.md                  # Expo app setup
 │   ├── SETUP_BACKEND.md         # Go server setup
 │   └── ADR/                     # architecture decision records
-├── backend/                 # Go realtime server (WS hub; route/voice stubbed 501)
+├── backend/                 # Go realtime server (WS hub + ORS route proxy; voice stubbed 501)
 └── mobile/                  # React Native (Expo) app — Android first, iOS later
 ```
 
@@ -83,8 +83,8 @@ Set the repo up in this order. Each step is self-contained.
 
 | Phase | Goal | Status |
 |-------|------|--------|
-| 0 | App shell + design tokens; own dot shows on the map. | `mobile/` has no app code yet |
-| 1 | Two phones see each other live. **(the whole product in miniature)** | — |
-| 2 | Route line. | backend stubbed (`501`) |
+| 0 | App shell + design tokens; own dot shows on the map. | design tokens done; screens pending |
+| 1 | Two phones see each other live. **(the whole product in miniature)** | backend done |
+| 2 | Route line + turn cues. | backend done (ORS proxy); app pending |
 | 3 | Push-to-talk voice. | backend stubbed (`501`) |
 | 4 | Background location, reconnect hardening, battery. | — |

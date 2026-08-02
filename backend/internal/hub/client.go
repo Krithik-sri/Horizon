@@ -25,13 +25,14 @@ type locMsg struct {
 }
 
 type Client struct {
-	room *Room
+	hub  *Hub
+	code string // ride code — which entry in hub.rooms this client belongs to
 	conn *websocket.Conn
 	send chan []byte
 	id   string
 	name string
 
-	// Latest fix — guarded by room.mu.
+	// Latest fix — guarded by hub.mu.
 	lat      float64
 	lng      float64
 	speed    float64
@@ -40,7 +41,7 @@ type Client struct {
 
 func (c *Client) readPump() {
 	defer func() {
-		c.room.unregister <- c
+		c.hub.remove(c)
 		c.conn.Close()
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
@@ -59,10 +60,10 @@ func (c *Client) readPump() {
 		if err := json.Unmarshal(data, &m); err != nil || m.Type != "loc" {
 			continue // ignore anything that isn't a well-formed loc
 		}
-		c.room.mu.Lock()
+		c.hub.mu.Lock()
 		c.lat, c.lng, c.speed = m.Lat, m.Lng, m.Speed
 		c.lastSeen = time.Now()
-		c.room.mu.Unlock()
+		c.hub.mu.Unlock()
 	}
 }
 
@@ -76,7 +77,7 @@ func (c *Client) writePump() {
 		select {
 		case msg, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if !ok { // room closed our channel
+			if !ok { // hub closed our channel — evicted by a reconnect, or GC'd
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/krithik/horizon/backend/internal/httpx"
 	"github.com/krithik/horizon/backend/internal/hub"
+	"github.com/krithik/horizon/backend/internal/ors"
 )
 
 // Server lifecycle timings.
@@ -59,6 +60,15 @@ func run() error {
 		logger.Info("CORS configured", "origins", origins)
 	}
 
+	// Same pattern as ALLOWED_ORIGINS above: read once at startup, warn rather than
+	// fail. A blank key is not fatal — the server still runs, and the route endpoint
+	// answers 503 until it's set.
+	orsKey := os.Getenv("ORS_API_KEY")
+	if orsKey == "" {
+		logger.Warn("ORS_API_KEY is not set — POST /rides/{code}/route will return 503 until it is")
+	}
+	orsClient := ors.New(orsKey, nil)
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -66,7 +76,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:    ":" + port,
-		Handler: buildHandler(logger, origins, hub.New()),
+		Handler: buildHandler(logger, origins, hub.New(), orsClient),
 
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
@@ -129,9 +139,9 @@ func run() error {
 
 		// Shutdown stops accepting, then waits for active requests to finish. It does
 		// not close hijacked connections, so live WebSockets are not sent a close
-		// frame here — they are simply cut when the process exits. Delivering close
-		// frames needs a hub-level teardown and a way for Room.run to exit, which is
-		// the room-lifecycle task's territory (HZ-012), not this one.
+		// frame here — they are simply cut when the process exits. Sending close
+		// frames on shutdown would need the hub to enumerate and close every live
+		// connection itself; that's still unimplemented.
 		if err := srv.Shutdown(sctx); err != nil {
 			logger.Error("graceful shutdown did not complete", "err", err)
 			return err
@@ -180,7 +190,7 @@ func newLogger(raw string) (*slog.Logger, error) {
 //
 // A per-IP rate limiter, when it lands, goes inside CORS so that a preflight is never
 // rate-limited.
-func buildHandler(logger *slog.Logger, origins []string, h *hub.Hub) http.Handler {
+func buildHandler(logger *slog.Logger, origins []string, h *hub.Hub, orsClient *ors.Client) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -191,11 +201,17 @@ func buildHandler(logger *slog.Logger, origins []string, h *hub.Hub) http.Handle
 	mux.HandleFunc("GET /ws", h.ServeWS)
 
 	mux.HandleFunc("POST /rides", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, map[string]string{"code": h.CreateRide()})
+		code := h.CreateRide()
+		if code == "" {
+			http.Error(w, "could not allocate a ride code", http.StatusServiceUnavailable)
+			return
+		}
+		writeJSON(w, map[string]string{"code": code})
 	})
 
-	// Phase 2: proxy a cycling route to OpenRouteService, store the polyline on the room.
-	mux.HandleFunc("POST /rides/{code}/route", notImplemented)
+	// Proxy a driving-car route through OpenRouteService and store it on the room —
+	// ORS has no motorcycle profile (CLAUDE.md).
+	mux.HandleFunc("POST /rides/{code}/route", routeHandler(h, orsClient))
 	// Phase 3: mint a LiveKit JWT for this rider + room.
 	mux.HandleFunc("POST /rides/{code}/voice-token", notImplemented)
 
