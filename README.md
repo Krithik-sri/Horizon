@@ -71,11 +71,41 @@ Set the repo up in this order. Each step is self-contained.
    → follow [`docs/SETUP_BACKEND.md`](./docs/SETUP_BACKEND.md)
 2. **App** — the Expo dev client, pointed at your local server.
    → follow [`docs/SETUP.md`](./docs/SETUP.md)
-3. **Free accounts you'll need** (none require a card):
-   - [OpenRouteService](https://openrouteservice.org/dev/#/signup) — free API key for cycling/motorcycle-friendly directions
-   - [LiveKit Cloud](https://cloud.livekit.io) — API key + secret + project URL, free tier
-   - [Supabase](https://supabase.com) — free tier, for durable state (auth, storage, ride history)
+3. **Free accounts you'll need right now** (none require a card):
+   - [OpenRouteService](https://openrouteservice.org/dev/#/signup) — free API key for directions.
+     Uses the `driving-car` profile: ORS has no motorcycle profile, and this is the closest
+     approximation.
    - Map tiles: **OpenFreeMap** — nothing to sign up for, just a style URL
+
+   [LiveKit Cloud](https://cloud.livekit.io) and [Supabase](https://supabase.com) are named in the
+   stack list above for later — voice is still Phase 3 and auth is deferred, so skip both accounts
+   until then.
+
+---
+
+## First ride
+
+Cloned the repo — here's the shortest path from that to three phones on an actual ride. Detail
+lives in [`docs/SETUP.md`](./docs/SETUP.md) and [`docs/SETUP_BACKEND.md`](./docs/SETUP_BACKEND.md);
+this is the order the pieces go in.
+
+1. **Get an OpenRouteService key.** Free, email signup, no card — the only credential this MVP
+   needs.
+2. **Run or deploy the backend.** Locally (`go run .`) for a tabletop test, or push to GitHub and
+   deploy to Koyeb for a real ride — both covered in `docs/SETUP_BACKEND.md`.
+3. **Point the app at it.** Edit `BASE_URL` in [`mobile/src/core/config.ts`](./mobile/src/core/config.ts)
+   — your LAN IP for a tabletop test, the Koyeb URL for a real one. Everything else (the WebSocket
+   URL, every HTTP call) derives from it.
+4. **Build once, install per rider.** MapLibre and LiveKit need native code, so Expo Go can't run
+   this app — see `docs/SETUP.md`. Do this *after* step 3: `eas build --profile preview --platform
+   android` bakes `config.ts`'s URL into the build at bundle time (`preview`, not `development` —
+   that profile expects a live Metro server, which nobody has on a road). Changing the URL later
+   means every rider needs a new install link.
+5. **Ride.** One rider creates a ride and reads the 6-character code aloud; everyone else joins
+   with it. Long-press the map to set a destination — it routes the whole convoy.
+
+Neither Supabase nor LiveKit is needed for this — auth is deferred (`docs/ADR/ADR-008.md`) and
+voice is still Phase 3, same as in the Quickstart above.
 
 ---
 
@@ -83,8 +113,8 @@ Set the repo up in this order. Each step is self-contained.
 
 | Phase | Goal | Status |
 |-------|------|--------|
-| 0 | App shell + design tokens; own dot shows on the map. | design tokens done; screens pending |
-| 1 | Two phones see each other live. **(the whole product in miniature)** | backend done |
-| 2 | Route line + turn cues. | backend done (ORS proxy); app pending |
-| 3 | Push-to-talk voice. | backend stubbed (`501`) |
+| 0 | App shell + design tokens; own dot shows on the map. | written, never run on a device |
+| 1 | Two phones see each other live. **(the whole product in miniature)** | backend verified; app written, never run |
+| 2 | Route line + turn cues. | backend verified; app written, never run |
+| 3 | Push-to-talk voice. | backend stubbed (`501`); app not started |
 | 4 | Background location, reconnect hardening, battery. | — |

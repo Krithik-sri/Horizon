@@ -8,11 +8,10 @@
 > route proxy. Durable state (auth, ride history, journal, photos) belongs to Supabase, not this
 > server — see `docs/ADR/ADR-008.md` for the split.
 >
-> **Phase 0 scope (this guide):** `GET /healthz`, `POST /rides` (reserve a join code), and
-> `GET /ws` (the location in/out pipe). The route proxy and voice-token endpoints are
-> The route proxy is now implemented (`POST /rides/{code}/route` → ORS → a `route` message
-> broadcast to the room, `docs/ADR/ADR-011.md`); the voice-token endpoint is still a
-> `501 Not Implemented` stub you fill in Phase 3.
+> **Scope of this guide:** `GET /healthz`, `POST /rides` (reserve a join code), `GET /ws` (the
+> location in/out pipe), and `POST /rides/{code}/route` (the ORS proxy — fetches a route and
+> broadcasts a `route` message to everyone in the room, `docs/ADR/ADR-011.md`). The voice-token
+> endpoint is still a `501 Not Implemented` stub you fill in Phase 3.
 >
 > No paid accounts, no credit card. The only secrets (LiveKit, ORS) come later and live **only**
 > here on the backend, never in the app.
@@ -30,39 +29,54 @@ If you prefer `go-setup.md`, just rename it — nothing depends on the filename.
 
 ---
 
-## 0. Install Go
+## 0. Go
 
-Go isn't installed on this machine yet. Install it (no account, no card):
+If Go isn't installed (no account, no card):
 
 ```powershell
 winget install GoLang.Go
 ```
 
-Close and reopen PowerShell so `PATH` picks up Go, then verify:
+Close and reopen PowerShell so `PATH` picks it up, then:
 
 ```powershell
-go version    # expect go1.22 or newer (we use net/http method routing, added in 1.22)
+go version
 ```
 
-✅ **Checkpoint:** `go version` prints `go1.22`+.
+`backend/go.mod` declares `go 1.26.4`, so that is the floor. (Go 1.22 is the older floor you'll
+see referenced elsewhere — it's when `net/http` gained method routing, which this server uses.)
+
+**One optional extra:** `go test -race` needs cgo, which on Windows needs a C compiler Go does not
+ship. Without one, `-race` fails with `cgo: C compiler "gcc" not found` while plain `go test`
+works fine. This matters because the hub is concurrent code and the race detector is the only
+thing that meaningfully checks it:
+
+```powershell
+winget install BrechtSanders.WinLibs.POSIX.UCRT
+# then, in a fresh shell:
+$env:CGO_ENABLED = 1
+go test -race ./...
+```
+
+✅ **Checkpoint:** `go version` prints `go1.26`+.
 
 ---
 
-## 1. Create the module
+## 1. The module
+
+Already created — `backend/go.mod` exists. You do not need to `go mod init` anything:
 
 ```powershell
-New-Item -ItemType Directory backend\internal\hub -Force | Out-Null
 Set-Location backend
-go mod init github.com/krithik/horizon/backend
-go get github.com/gorilla/websocket@latest
-Set-Location ..
+go mod download
 ```
 
-> The module path doesn't need to resolve on the internet — it's just the import prefix. If you
-> ever push this to GitHub under a different name, change it here and in the `import` lines.
+> One dependency, deliberately: `github.com/gorilla/websocket`. Everything else is standard
+> library ([`ADR-001`](./ADR/ADR-001.md)). The module path is just an import prefix — it doesn't
+> need to resolve over the internet.
 
-✅ **Checkpoint:** `backend\go.mod` exists and lists `github.com/gorilla/websocket` under
-`require`. `backend\go.sum` was created.
+✅ **Checkpoint:** `backend\go.mod` lists `github.com/gorilla/websocket` under `require`, and
+`go build ./...` succeeds.
 
 ---
 
@@ -294,6 +308,30 @@ SUPABASE_URL=
 SUPABASE_JWT_SECRET=
 ```
 
+### `.env.example` is documentation, not a loader
+
+Copying this file to `.env` and filling in values is the usual workflow for a project like this
+one — and it **does not work here**. Grep `backend/*.go` for `godotenv` or `dotenv` and you'll
+find nothing: the server reads real environment variables through `os.Getenv` only (`backend/main.go`)
+— no `.env` file is ever opened. That's deliberate, not an oversight: one stdlib call needs no new
+dependency, consistent with this repo's stdlib-first rule (`docs/ADR/ADR-001.md`). It does mean a
+`.env` sitting next to `server.exe` is completely inert — you'll get `503 route service is not
+configured` from `POST /rides/{code}/route`, with nothing pointing you at why.
+
+Set the variable in the shell that runs the server instead:
+
+```powershell
+$env:ORS_API_KEY = "your-key-here"
+cd backend
+go run .
+```
+
+That value lives only in **this** PowerShell session — close the window, or open a new one, and
+it's gone; you set it again. In a deployment it isn't your problem at all: the platform sets it
+(Koyeb's dashboard — see *Deploying* below), which is exactly why a `.env` loader was never added.
+Local dev and production end up using the same mechanism, real environment variables, instead of
+two different ones.
+
 ### `ALLOWED_ORIGINS`
 
 **Purpose.** The allowlist of browser origins permitted to call the HTTP API. It is the only
@@ -506,35 +544,100 @@ rider it is.
 
 ## 10. Connecting from the mobile app
 
-The Android emulator can't reach `localhost` — it reaches your host machine at **`10.0.2.2`**.
-So the app's dev URL is `ws://10.0.2.2:8080/ws?ride=...&name=...` (already the value in
-`docs/SETUP.md §7`). A physical device uses your computer's LAN IP instead.
+The app keeps this address in one place: `BASE_URL` in `mobile/src/core/config.ts`. The WebSocket
+URL derives from it (`http` → `ws`, `https` → `wss`), so there is only ever one value to change.
+
+- **Android emulator** — `http://10.0.2.2:8080`. The emulator cannot reach `localhost`; `10.0.2.2`
+  is how it addresses the host machine. This is the file's default.
+- **Physical device** — your computer's LAN IP, e.g. `http://192.168.1.20:8080`. Both `localhost`
+  and `10.0.2.2` fail on real hardware.
+- **Deployed** — the Koyeb URL (`https://…`, which derives `wss://`).
+
+`docs/SETUP.md` covers the app side, including the fact that a `preview` build bakes this value in
+at bundle time — so set it before building, not after.
 
 ---
 
-## Deployment later — Cloudflare Tunnel in front of the Go binary
+## Deploying
 
-You don't need this for development, but here's the plan (chosen because the backend must stay
-Go, and Cloudflare's free realtime primitive — Durable Objects — is TypeScript-only):
+Two paths, for two different needs. **Koyeb** is the real deployment — it builds
+`backend/Dockerfile` from GitHub on every push and gives you a stable `https://` URL, free and
+without a card. **Cloudflare Tunnel** is faster to stand up for a one-off: no build, no commit, no
+Dockerfile — it just puts TLS in front of the binary you already have running locally.
 
-1. Run the single `server.exe` (or a Linux build: `GOOS=linux GOARCH=amd64 go build -o server .`)
-   on a host that's free **without a card**: Koyeb's free instance, or simply your own machine.
-   (Check the fine print elsewhere — Oracle "Always-Free" and Fly.io both want a card at signup
-   for verification, and Render's free web services spin down on idle, which kills WebSockets.)
-2. Put **Cloudflare Tunnel** (`cloudflared`) in front of it for TLS/`wss://` with no open
-   inbound ports. Two flavours:
-   - **Quick tunnel** (`cloudflared tunnel --url http://localhost:8080`) — zero signup, no card,
-     but the `*.trycloudflare.com` URL is random and changes on every restart. Fine for a friend
-     group that re-shares a link.
-   - **Named tunnel** — stable hostname, but requires a domain you own added to Cloudflare
-     (domains cost ~$10/yr; this is the one place "no card" bends if you want a fixed URL).
-3. Tighten `upgrader.CheckOrigin` (step 4) to your real origin before going public, and switch
-   the client from `ws://` to `wss://`.
+### Koyeb (primary)
 
-The Go code above is host-agnostic — it reads only `PORT` and `ALLOWED_ORIGINS`, so nothing here
-changes when you deploy; you just wrap it. **Set `ALLOWED_ORIGINS` to the tunnel hostname as part
-of that step** (see §6): a deployed server left blank allows every origin, which is exactly the
-state the startup warning is telling you about.
+`backend/Dockerfile` and `backend/.dockerignore` exist for exactly this. The Dockerfile is a
+multi-stage build: a `golang:1.26-alpine` stage compiles a fully static binary
+(`CGO_ENABLED=0 GOOS=linux go build -trimpath ...`), and only that binary is copied into
+`gcr.io/distroless/static-debian12:nonroot` — no shell, no package manager, running as uid 65532
+instead of root. `.dockerignore` keeps `*_test.go`, `wstest.mjs`, and any stray `.env` out of the
+build context.
+
+Create a Koyeb app from the GitHub repo with these settings:
+
+| Setting | Value |
+|---|---|
+| Source | GitHub repo |
+| Builder | Dockerfile |
+| Dockerfile path | `backend/Dockerfile` |
+| Work directory | `backend` |
+| Health check | HTTP, path `/healthz` |
+| Env var | `ORS_API_KEY` (mark as **secret**) |
+| Env var | `LOG_LEVEL=info` |
+| Instance | Free |
+
+A few things worth knowing before you click deploy:
+
+- **Don't set `PORT`.** Koyeb injects its own; `main.go` reads it via `os.Getenv("PORT")` and only
+  falls back to `8080` when it's unset. Setting it yourself just risks it disagreeing with what
+  Koyeb actually forwards traffic to. `ORS_API_KEY` and `LOG_LEVEL`, by contrast, you do set — as
+  real Koyeb environment variables in the dashboard, the same mechanism as the `$env:` line in §6
+  above, never a `.env` file baked into the image.
+- **`ALLOWED_ORIGINS` can stay unset.** There is no browser client (`docs/ADR/ADR-007.md`), so
+  CORS — a browser-enforced mechanism — isn't the security boundary for this server. You'll see
+  the "every origin is allowed" warning in the Koyeb logs at startup; that's the expected state
+  here, not a problem to chase down.
+- **The race detector cannot run in this image.** `-race` needs cgo, and the Dockerfile builds
+  with `CGO_ENABLED=0` specifically so the final stage can be `distroless/static`, which has
+  nothing for a dynamically-linked binary to link against. Race testing (`go test -race`) happens
+  against the module in dev/CI, never against the deployed artifact.
+- **Koyeb builds from GitHub, not your working tree.** Commit and push before deploying — an
+  uncommitted change or an unpushed branch simply isn't there when the build runs.
+
+### Cloudflare Tunnel (quick, no build step)
+
+For a tabletop test — everyone in the same room, backend on your laptop, nothing pushed to
+GitHub — put Cloudflare Tunnel in front of the binary you already have running:
+
+1. Run `go run .` (or build a Linux binary for a spare machine:
+   `GOOS=linux GOARCH=amd64 go build -o server .`).
+2. `cloudflared tunnel --url http://localhost:8080` for TLS/`wss://` with no open inbound ports.
+   Two flavours:
+   - **Quick tunnel** — zero signup, no card, but the `*.trycloudflare.com` URL is random and
+     changes on every restart. Fine for a friend group that re-shares a link.
+   - **Named tunnel** — stable hostname, but needs a domain you own added to Cloudflare (domains
+     cost ~$10/yr — the one place "no card" bends if you want a fixed URL).
+3. Point the app at the tunnel's `https://` URL (`wss://` follows automatically —
+   `mobile/src/core/config.ts`). `ALLOWED_ORIGINS` can stay unset here too, for the same reason as
+   Koyeb above — set it only if you're also fronting some browser-based tooling through the same
+   tunnel (see §5, *The CORS wrapper*).
+
+### Security reality check
+
+Either path above puts an **unauthenticated WebSocket server on the public internet**. Be honest
+with yourself about what that means before you send the URL to anyone:
+
+- **`/ws` has no auth.** Supabase JWT verification is designed (`docs/ADR/ADR-008.md`) but not
+  implemented — anyone who reaches the URL with a valid ride code can join.
+- **`upgrader.CheckOrigin` returns `true` for every request** (`backend/internal/hub/hub.go`) —
+  nothing checks where a WebSocket upgrade came from.
+- **There is no rate limiting**, and no cap on the number of rooms or connections.
+
+The only real gate is the join code itself: 6 characters from a 32-character alphabet — about 1.07
+billion possibilities — and a room is garbage-collected 5 minutes after it empties, including a
+code nobody ever joined. That's a reasonable barrier for a handful of friends on a URL nobody else
+has, and it is not an auth boundary for anything more exposed than that.
 
 ---
 
@@ -548,7 +651,7 @@ state the startup warning is telling you about.
 - **`POST /rides/{code}/route`** — ORS driving-car proxy + storing the polyline on the room (Phase 2).
 - **`POST /rides/{code}/voice-token`** — LiveKit JWT minting (Phase 3).
 - **`wss://` in production** — the dev server still speaks plaintext `ws://`; switching to TLS is
-  a deployment step (see *Deployment later*, below), not something `docs/ADR/ADR-010.md` touches.
+  a deployment step (see *Deploying*, above), not something `docs/ADR/ADR-010.md` touches.
 - **Supabase JWT verification middleware** — the Go server verifies (never mints) Supabase-issued
   JWTs before trusting a caller's identity; not yet implemented (`docs/ADR/ADR-008.md`).
 - **Redacting `Authorization` in the logging middleware** — once JWTs flow through `/ws`, the

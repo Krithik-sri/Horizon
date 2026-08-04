@@ -57,26 +57,35 @@ export const color = {
 // rather than a silently-ignored style at runtime) while still giving each entry its literal type.
 // Deliberately NOT `as const` — that would make the fontVariant arrays readonly, which RN's
 // mutable FontVariant[] rejects.
+//
+// Each entry names a WEIGHT-SPECIFIC font family (`Inter_600SemiBold`), not a family plus a
+// `fontWeight`. That is not a style preference — it is how custom fonts work on Android. Each
+// face registers under its own family name (see the useFonts call in src/app/_layout.tsx), and
+// `fontWeight` does not select between them; a token carrying only `fontWeight: '700'` silently
+// renders in the system font (Roboto) at whatever weight it can manage. Setting both risks
+// faux-bolding an already-bold face, so weight lives in the family name and nowhere else.
 export const type = {
   motion: {
     // Motion is the largest register, not the smallest — the rider is furthest from the screen
     // and has the least time. All riding numerals use tabular figures so digits don't shift
     // width as the value changes (that shift is exactly the flicker the Presence pillar forbids).
-    primary: { fontSize: 64, lineHeight: 64, fontWeight: '700', fontVariant: ['tabular-nums'] }, // the one number that matters
-    secondary: { fontSize: 32, lineHeight: 36, fontWeight: '600', fontVariant: ['tabular-nums'] }, // at most one of these on screen
-    label: { fontSize: 15, lineHeight: 20, fontWeight: '500', letterSpacing: 1.2, textTransform: 'uppercase' }, // +0.08em @ 15 = 1.2
+    primary: { fontSize: 64, lineHeight: 64, fontFamily: 'Inter_700Bold', fontVariant: ['tabular-nums'] }, // the one number that matters
+    secondary: { fontSize: 32, lineHeight: 36, fontFamily: 'Inter_600SemiBold', fontVariant: ['tabular-nums'] }, // at most one of these on screen
+    label: { fontSize: 15, lineHeight: 20, fontFamily: 'Inter_500Medium', letterSpacing: 1.2, textTransform: 'uppercase' }, // +0.08em @ 15 = 1.2
   },
   departure: {
-    display: { fontSize: 40, lineHeight: 44, fontWeight: '600' },
-    title: { fontSize: 28, lineHeight: 34, fontWeight: '600' },
-    body: { fontSize: 17, lineHeight: 24, fontWeight: '400' },
-    label: { fontSize: 13, lineHeight: 18, fontWeight: '500', letterSpacing: 0.78, textTransform: 'uppercase' }, // +0.06em @ 13 = 0.78
+    display: { fontSize: 40, lineHeight: 44, fontFamily: 'Inter_600SemiBold' },
+    title: { fontSize: 28, lineHeight: 34, fontFamily: 'Inter_600SemiBold' },
+    body: { fontSize: 17, lineHeight: 24, fontFamily: 'Inter_400Regular' },
+    label: { fontSize: 13, lineHeight: 18, fontFamily: 'Inter_500Medium', letterSpacing: 0.78, textTransform: 'uppercase' }, // +0.06em @ 13 = 0.78
   },
   reflective: {
-    // The only register where the serif appears.
-    title: { fontSize: 32, lineHeight: 40, fontWeight: '400', fontFamily: 'Newsreader' },
-    body: { fontSize: 19, lineHeight: 30, fontWeight: '400', fontFamily: 'Newsreader' }, // generous leading, this is for reading
-    caption: { fontSize: 14, lineHeight: 20, fontWeight: '400', fontFamily: 'Inter' }, // captions and stats stay operational
+    // The only register where the serif appears — Return only, which this MVP does not build.
+    // Newsreader is therefore NOT loaded by _layout.tsx yet: these three will fall back to the
+    // system font until it is. Load it alongside Inter when Return gets built.
+    title: { fontSize: 32, lineHeight: 40, fontFamily: 'Newsreader_400Regular' },
+    body: { fontSize: 19, lineHeight: 30, fontFamily: 'Newsreader_400Regular' }, // generous leading, this is for reading
+    caption: { fontSize: 14, lineHeight: 20, fontFamily: 'Inter_400Regular' }, // captions and stats stay operational
   },
 } satisfies Record<string, Record<string, TextStyle>>
 

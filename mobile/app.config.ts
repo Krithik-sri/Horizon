@@ -3,6 +3,11 @@ export default {
     name: "Horizon",
     slug: "horizon",
     scheme: "horizon",
+    extra: {
+      eas: {
+           projectId: "d63fd554-61aa-4052-9250-cbe69ab87bcf"
+      }
+    },
     ios: {
       bundleIdentifier: "com.krithik.horizon",
       infoPlist: {
