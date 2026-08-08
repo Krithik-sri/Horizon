@@ -1,0 +1,54 @@
+# What EAS Build uploads. Repo root only — a .easignore anywhere else is ignored.
+#
+# READ THIS BEFORE EDITING: .easignore does not *add* to .gitignore, it REPLACES it.
+# When this file exists, EAS CLI stops respecting every .gitignore in the repo, so
+# anything not listed here IS uploaded — including files git has always ignored.
+# That is why node_modules/ and .env appear below despite being gitignored already:
+# deleting a line here does not fall back to .gitignore, it starts uploading.
+#
+# EAS archives from the git root, so this covers backend/ and docs/ too, neither of
+# which an Android build has any use for.
+
+# --- secrets -----------------------------------------------------------------
+# First, and non-negotiable. Env values reach the build through eas.json's `env`
+# block and EAS Secrets, never through an uploaded file (CLAUDE.md constraint #4).
+.env
+.env.*
+**/.env
+**/.env.*
+
+# --- dependencies ------------------------------------------------------------
+node_modules/
+**/node_modules/
+
+# --- native projects ---------------------------------------------------------
+# Continuous Native Generation: android/ and ios/ are build output, not source —
+# they are gitignored, and app.config.ts is the source of truth for every plugin
+# and permission. EAS runs `expo prebuild` to regenerate them, so shipping the
+# local 4 GB copy (with its Gradle/CMake trees) only slows the upload down.
+mobile/android/
+mobile/ios/
+mobile/.expo/
+
+# --- the Go backend and the docs ---------------------------------------------
+# Deployed separately; nothing here is compiled into the app.
+backend/
+docs/
+design/
+.claude/
+
+# --- build artifacts and local noise -----------------------------------------
+**/build/
+**/.gradle/
+**/.cxx/
+*.apk
+*.aab
+*.keystore
+*.log
+*.tmp
+*.temp
+.git/
+.idea/
+**/.vscode/
+.DS_Store
+Thumbs.db
