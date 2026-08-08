@@ -1,54 +1,46 @@
 # What EAS Build uploads. Repo root only — a .easignore anywhere else is ignored.
 #
-# READ THIS BEFORE EDITING: .easignore does not *add* to .gitignore, it REPLACES it.
-# When this file exists, EAS CLI stops respecting every .gitignore in the repo, so
-# anything not listed here IS uploaded — including files git has always ignored.
-# That is why node_modules/ and .env appear below despite being gitignored already:
-# deleting a line here does not fall back to .gitignore, it starts uploading.
+# READ THIS BEFORE EDITING — two traps, both of which have already bitten:
 #
-# EAS archives from the git root, so this covers backend/ and docs/ too, neither of
-# which an Android build has any use for.
+# 1. This file REPLACES every .gitignore in the repo. It does not add to them. So
+#    anything not listed here IS uploaded, including files git has always ignored.
+#    That is why node_modules/ and .env appear below despite being gitignored:
+#    deleting a line here does not fall back to .gitignore, it starts uploading.
+#
+# 2. A pattern without a leading slash matches at EVERY depth. `design/` looks like
+#    it means the repo-root design/ folder; it also matches mobile/src/design/ and
+#    silently drops tokens.ts, which every screen imports — the build then fails in
+#    `expo export:embed` with no useful message. Anchor root-relative paths with a
+#    leading slash. Keep this list short: the size win is almost entirely
+#    node_modules/ and mobile/android/, and every extra pattern is another chance
+#    to delete something the bundler needs.
 
 # --- secrets -----------------------------------------------------------------
-# First, and non-negotiable. Env values reach the build through eas.json's `env`
-# block and EAS Secrets, never through an uploaded file (CLAUDE.md constraint #4).
+# Env values reach the build through eas.json's `env` block and EAS Secrets,
+# never through an uploaded file (CLAUDE.md constraint #4).
 .env
 .env.*
 **/.env
 **/.env.*
 
-# --- dependencies ------------------------------------------------------------
+# --- dependencies (5.4 GB) — reinstalled on the build machine ----------------
 node_modules/
-**/node_modules/
 
-# --- native projects ---------------------------------------------------------
-# Continuous Native Generation: android/ and ios/ are build output, not source —
-# they are gitignored, and app.config.ts is the source of truth for every plugin
-# and permission. EAS runs `expo prebuild` to regenerate them, so shipping the
-# local 4 GB copy (with its Gradle/CMake trees) only slows the upload down.
-mobile/android/
-mobile/ios/
-mobile/.expo/
+# --- native projects (4.0 GB) ------------------------------------------------
+# Continuous Native Generation: android/ and ios/ are build output, not source.
+# They are gitignored and app.config.ts is the source of truth for every plugin
+# and permission, so EAS runs `expo prebuild` to regenerate them.
+/mobile/android/
+/mobile/ios/
+/mobile/.expo/
 
-# --- the Go backend and the docs ---------------------------------------------
-# Deployed separately; nothing here is compiled into the app.
-backend/
-docs/
-design/
-.claude/
+# --- deployed separately, not compiled into the app --------------------------
+/backend/
+/docs/
 
-# --- build artifacts and local noise -----------------------------------------
-**/build/
-**/.gradle/
-**/.cxx/
+# --- binaries and local noise ------------------------------------------------
 *.apk
 *.aab
 *.keystore
+*.exe
 *.log
-*.tmp
-*.temp
-.git/
-.idea/
-**/.vscode/
-.DS_Store
-Thumbs.db

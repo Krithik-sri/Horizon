@@ -156,7 +156,8 @@ rider out past ~10s. Clients pass a stable `rider` id on `GET /ws?ride=…&name=
 `Authorization: Bearer <supabase-jwt>`, so a reconnect replaces the old connection.
 
 HTTP: `POST /rides` (→ join code) · `POST /rides/{code}/route` (ORS proxy → polyline) ·
-`POST /rides/{code}/voice-token` (→ LiveKit JWT + url) · `GET /ws` · `GET /healthz`.
+`POST /geocode` (ORS Pelias proxy → places) · `POST /rides/{code}/voice-token`
+(→ LiveKit JWT + url) · `GET /ws` · `GET /healthz`.
 
 ---
 

@@ -51,3 +51,21 @@ export async function fetchRoute(code: string, waypoints: Waypoint[]): Promise<F
   };
   return { ok: false, error: byStatus[res.status] ?? 'network' };
 }
+
+/** A failed setDestination is otherwise invisible — the map just doesn't change.
+ * Ambient text only, the lowest rung of the attention ladder (horizon-design SKILL.md).
+ * Shared by ride/[code].tsx (long-press) and index.tsx (Departure search) — both
+ * surface this through their own inline-error UI, not through this function. */
+export function routeErrorText(error: FetchRouteError | null): string | null {
+  switch (error) {
+    case 'no-route':
+      return 'No route found.';
+    case 'unavailable':
+    case 'upstream-failed':
+      return 'Route unavailable.';
+    case 'network':
+      return "Couldn't reach the route service.";
+    default:
+      return null; // unknown-ride / bad-waypoints: not reachable from a long-press in practice
+  }
+}

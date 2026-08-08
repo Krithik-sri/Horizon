@@ -212,6 +212,9 @@ func buildHandler(logger *slog.Logger, origins []string, h *hub.Hub, orsClient *
 	// Proxy a driving-car route through OpenRouteService and store it on the room —
 	// ORS has no motorcycle profile (CLAUDE.md).
 	mux.HandleFunc("POST /rides/{code}/route", routeHandler(h, orsClient))
+	// Free-typed address search, proxied to ORS's Pelias geocoder. Not ride-scoped —
+	// see geocodeHandler's doc comment for why, and for why this is POST not GET.
+	mux.HandleFunc("POST /geocode", geocodeHandler(orsClient))
 	// Phase 3: mint a LiveKit JWT for this rider + room.
 	mux.HandleFunc("POST /rides/{code}/voice-token", notImplemented)
 

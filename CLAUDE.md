@@ -169,7 +169,14 @@ that isn't named `lat`/`lng`. `wayPoints` are indices into `polyline`. `steps` a
 be `null`. Rationale, and why this isn't a field on `state`: `docs/ADR/ADR-011.md`.
 
 HTTP: `POST /rides` (→ join code) · `POST /rides/{code}/route` (ORS proxy → polyline) ·
-`POST /rides/{code}/voice-token` (→ LiveKit JWT + url) · `GET /ws` · `GET /healthz`.
+`POST /geocode` (ORS Pelias proxy → places) · `POST /rides/{code}/voice-token`
+(→ LiveKit JWT + url) · `GET /ws` · `GET /healthz`.
+
+`POST /geocode` is deliberately **not** ride-scoped (a place search has nothing to do with a
+room) and deliberately **POST, not `GET ?q=`** — `internal/httpx/logging.go` logs request URLs,
+and a searched destination is location data. Body `{"text": "…", "near": [lat, lng]}` (`near`
+optional, biases results); response `{"results": [{"label", "lat", "lng"}]}`. Zero matches is a
+200 with an empty array, not an error.
 
 A ride code must be minted by `POST /rides` before `/ws` will accept it — an unknown code gets
 **404** before the upgrade. Rooms (and their codes) are garbage-collected 5 minutes after the

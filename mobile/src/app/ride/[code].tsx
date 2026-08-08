@@ -6,11 +6,12 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
 import { color, type } from '@/design/tokens';
 import { loadRiderName } from '@/core/riderId';
-import type { FetchRouteError } from '@/core/route';
+import { routeErrorText } from '@/core/route';
 import { useRide } from '@/state/useRide';
 import AheadCue from '@/features/motion/AheadCue';
 import HorizonLine from '@/features/motion/HorizonLine';
 import SpeedReadout from '@/features/motion/SpeedReadout';
+import DestinationMarker from '@/features/convoy/DestinationMarker';
 import MapCanvas from '@/features/convoy/MapCanvas';
 import RiderMarkers from '@/features/convoy/RiderMarkers';
 import RouteLine from '@/features/convoy/RouteLine';
@@ -25,22 +26,6 @@ function ambientStatusText(status: ReturnType<typeof useRide.getState>['status']
   if (status === 'reconnecting') return 'Reconnecting…';
   if (status === 'closed' || status === 'rejected') return 'Connection lost';
   return null;
-}
-
-/** A failed setDestination is otherwise invisible — the map just doesn't change.
- * Ambient text only, the lowest rung of the attention ladder (horizon-design SKILL.md). */
-function routeErrorText(error: FetchRouteError | null): string | null {
-  switch (error) {
-    case 'no-route':
-      return 'No route found.';
-    case 'unavailable':
-    case 'upstream-failed':
-      return 'Route unavailable.';
-    case 'network':
-      return "Couldn't reach the route service.";
-    default:
-      return null; // unknown-ride / bad-waypoints: not reachable from a long-press in practice
-  }
 }
 
 export default function RideScreen() {
@@ -140,6 +125,7 @@ export default function RideScreen() {
     <View style={{ flex: 1, backgroundColor: color.surface.void }}>
       <MapCanvas ownPosition={ownLngLat} onLongPress={handleLongPress}>
         <RouteLine polyline={route?.polyline ?? []} />
+        <DestinationMarker polyline={route?.polyline ?? []} />
         <RiderMarkers riders={riders} ownId={ownId} ownLngLat={ownLngLat} />
       </MapCanvas>
       <HorizonLine

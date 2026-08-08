@@ -5,6 +5,8 @@ import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 
 import { BASE_URL } from '@/core/config';
+import { searchPlaces, type Place, type SearchError } from '@/core/geocode';
+import { routeErrorText } from '@/core/route';
 import { color, radius, register, space, type } from '@/design/tokens';
 import { useRide } from '@/state/useRide';
 
@@ -34,6 +36,21 @@ const codeDisplayStyle: TextStyle = {
 type PermissionStatus = 'granted' | 'denied' | 'undetermined';
 type StartFlowState = 'idle' | 'posting' | 'confirm';
 type JoinFlowState = 'idle' | 'connecting';
+type SearchFlowState = 'idle' | 'searching' | 'setting-route';
+
+/** A failed searchPlaces call is otherwise invisible — same inline-error treatment
+ * as startError/joinError below, just mapped from geocode.ts's error union. */
+function searchErrorText(error: SearchError): string {
+  switch (error) {
+    case 'unavailable':
+    case 'upstream-failed':
+      return 'Search unavailable.';
+    case 'network':
+      return "Couldn't reach the search service.";
+    case 'bad-query':
+      return "Couldn't search for that.";
+  }
+}
 
 export default function DepartureScreen() {
   const router = useRouter();
@@ -49,6 +66,19 @@ export default function DepartureScreen() {
   const [joinCode, setJoinCode] = useState('');
   const [joinState, setJoinState] = useState<JoinFlowState>('idle');
   const [joinError, setJoinError] = useState<string | null>(null);
+
+  // The one-shot fix used both as the search bias (`near`) and as waypoint 1 of the
+  // route below. Departure otherwise never touches GPS — only Motion watches position
+  // — so this is deliberately a single getCurrentPositionAsync() call, not a
+  // subscription: a search field has no business keeping location watched.
+  const [originFix, setOriginFix] = useState<{ lat: number; lng: number } | null>(null);
+  const [query, setQuery] = useState('');
+  const [searchState, setSearchState] = useState<SearchFlowState>('idle');
+  const [places, setPlaces] = useState<Place[] | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  // The chosen result's label, once picked — its presence swaps the search UI for a
+  // plain confirmation line (see the render below).
+  const [picked, setPicked] = useState<string | null>(null);
 
   async function requestPermission() {
     try {
@@ -117,6 +147,69 @@ export default function DepartureScreen() {
     }, 10000);
     return () => clearTimeout(timer);
   }, [joinState]);
+
+  // Fetch a one-shot fix the moment the confirm state is entered — a ride code exists
+  // and the socket is open by then, which is what setDestination requires. Deps are
+  // just [startState] so this fires once per confirm attempt, not on every keystroke
+  // in the search field below.
+  useEffect(() => {
+    if (startState !== 'confirm') return;
+    (async () => {
+      try {
+        const pos = await Location.getCurrentPositionAsync();
+        setOriginFix({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      } catch {
+        // A permissions edge case must never crash the screen — handleSearch below
+        // surfaces the missing fix instead.
+      }
+    })();
+  }, [startState]);
+
+  async function handleSearch() {
+    setSearchError(null);
+    setPlaces(null);
+    const text = query.trim();
+    if (!text) return; // nothing typed — silent no-op, not an error
+    if (!originFix) {
+      setSearchError('Need your location to plan a route.');
+      return;
+    }
+    setSearchState('searching');
+    const result = await searchPlaces(text, originFix);
+    setSearchState('idle');
+    if (!result.ok) {
+      setSearchError(searchErrorText(result.error));
+      return;
+    }
+    setPlaces(result.places);
+  }
+
+  // Sets the ride's one route via the store (which POSTs and records routeError —
+  // not duplicated here); the route then reaches every rider over the WebSocket.
+  // `picked` is set only after that await resolves WITHOUT a routeError — setting it
+  // optimistically would show the rider a confirmed destination for a route that
+  // never actually happened (no-route, quota, unreachable server), the same silent
+  // failure DestinationMarker exists to avoid on the map side.
+  async function handlePick(place: Place) {
+    if (!originFix) return; // unreachable: handleSearch already required a fix
+    setPlaces(null);
+    setSearchError(null);
+    setSearchState('setting-route');
+    await useRide.getState().setDestination([
+      [originFix.lat, originFix.lng],
+      [place.lat, place.lng],
+    ]);
+    setSearchState('idle');
+    const { routeError } = useRide.getState();
+    if (routeError) {
+      // unknown-ride is genuinely reachable here (unlike the long-press path in
+      // ride/[code].tsx) — the room can GC between minting the code and picking a
+      // destination — so routeErrorText's null case still needs a visible fallback.
+      setSearchError(routeErrorText(routeError) ?? "Couldn't set that destination.");
+      return; // picked stays unset — search UI stays up so the rider can retry
+    }
+    setPicked(place.label);
+  }
 
   async function handleStart() {
     setStartError(null);
@@ -233,6 +326,66 @@ export default function DepartureScreen() {
         ) : (
           <View style={{ marginTop: space[4] }}>
             <Text style={codeDisplayStyle}>{startCode}</Text>
+
+            <Text style={[type.departure.title, { color: color.ink.primary, marginTop: space[7] }]}>
+              Where to?
+            </Text>
+            {picked ? (
+              <Text style={[type.departure.body, { color: color.ink.primary, marginTop: space[2] }]}>
+                {picked}
+              </Text>
+            ) : (
+              <>
+                <TextInput
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="Search for a destination"
+                  placeholderTextColor={color.ink.tertiary}
+                  returnKeyType="search"
+                  onSubmitEditing={handleSearch}
+                  style={[
+                    type.departure.body,
+                    {
+                      color: color.ink.primary,
+                      minHeight: register.departure.touchTarget,
+                      borderBottomWidth: 1,
+                      borderColor: color.surface.hairline,
+                      marginTop: space[2],
+                    },
+                  ]}
+                />
+                {searchState === 'searching' && (
+                  <Text style={[type.departure.body, { color: color.ink.secondary, marginTop: space[2] }]}>
+                    Searching…
+                  </Text>
+                )}
+                {searchState === 'setting-route' && (
+                  <Text style={[type.departure.body, { color: color.ink.secondary, marginTop: space[2] }]}>
+                    Setting route…
+                  </Text>
+                )}
+                {places?.length === 0 && (
+                  <Text style={[type.departure.body, { color: color.ink.secondary, marginTop: space[2] }]}>
+                    No results.
+                  </Text>
+                )}
+                {places?.map((place, i) => (
+                  <Pressable
+                    key={`${place.lat},${place.lng},${i}`}
+                    onPress={() => handlePick(place)}
+                    style={{ minHeight: register.departure.touchTarget, justifyContent: 'center' }}
+                  >
+                    <Text style={[type.departure.body, { color: color.ink.primary }]}>{place.label}</Text>
+                  </Pressable>
+                ))}
+                {searchError && (
+                  <Text style={[type.departure.body, { color: color.ink.primary, marginTop: space[2] }]}>
+                    {searchError}
+                  </Text>
+                )}
+              </>
+            )}
+
             <Pressable
               disabled={!startRidingEnabled}
               onPress={handleStartRiding}
