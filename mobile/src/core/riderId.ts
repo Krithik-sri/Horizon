@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { uuid } from 'expo-modules-core';
 
 const STORAGE_KEY = 'horizon.riderId';
+const NAME_KEY = 'horizon.riderName';
 
 /**
  * getRiderId — a stable per-install id, generated once and persisted to
@@ -35,4 +36,27 @@ export async function getRiderId(): Promise<string> {
   const id = uuid.v4();
   await AsyncStorage.setItem(STORAGE_KEY, id);
   return id;
+}
+
+/**
+ * saveRiderName / loadRiderName — the display name this device last rode under.
+ *
+ * Why it's persisted: ride/[code].tsx can be reached without Departure ever calling
+ * join() — a deep link (horizon://ride/ABC123), a Fast Refresh remount, or Android
+ * killing the backgrounded app all skip it. The ride code comes from the route param
+ * in that case, but the name has nowhere else to come from, and rejoining without one
+ * would relabel the rider mid-ride on everyone else's map.
+ *
+ * Deliberately *not* cleared on leave(). The name alone can't cause a stray rejoin —
+ * that only happens when a real /ride/{code} route is mounted, and the code always
+ * comes from the route, never from here. Clearing it would also race: join() calls
+ * leave() before writing, so a fire-and-forget clear could land after the save and
+ * wipe it.
+ */
+export async function saveRiderName(name: string): Promise<void> {
+  await AsyncStorage.setItem(NAME_KEY, name);
+}
+
+export async function loadRiderName(): Promise<string | null> {
+  return AsyncStorage.getItem(NAME_KEY);
 }

@@ -30,17 +30,40 @@ type Hub struct {
 	// Shard per-room if concurrent rides ever reach the hundreds.
 	mu    sync.Mutex
 	rooms map[string]*Room
+
+	// allowedOrigins backs checkOrigin below — the same allowlist httpx.CORS is built
+	// from (see main.go), since CORS itself never runs against a WebSocket upgrade.
+	allowedOrigins map[string]struct{}
+	allowAll       bool // true when allowedOrigins is empty — dev default, see checkOrigin
+
+	upgrader websocket.Upgrader
 }
 
 // newHub builds the hub without the sweep goroutine, so tests can drive sweep()
 // deterministically instead of sleeping through the GC grace window. New() is the
 // production constructor.
-func newHub() *Hub {
-	return &Hub{rooms: make(map[string]*Room)}
+//
+// origins is the same parsed ALLOWED_ORIGINS allowlist httpx.CORS uses (see checkOrigin
+// for why the WebSocket upgrade needs its own copy of it).
+func newHub(origins []string) *Hub {
+	h := &Hub{
+		rooms:          make(map[string]*Room),
+		allowedOrigins: make(map[string]struct{}, len(origins)),
+		allowAll:       len(origins) == 0,
+	}
+	for _, o := range origins {
+		h.allowedOrigins[o] = struct{}{}
+	}
+	h.upgrader = websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin:     h.checkOrigin,
+	}
+	return h
 }
 
-func New() *Hub {
-	h := newHub()
+func New(origins []string) *Hub {
+	h := newHub(origins)
 	go h.tick()
 	return h
 }
@@ -71,11 +94,25 @@ func (h *Hub) sweep(now time.Time) {
 	}
 }
 
-// Dev-only: accept any origin. Tighten before any public deployment.
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin:     func(*http.Request) bool { return true },
+// checkOrigin is the upgrader's CheckOrigin for /ws.
+//
+// A native React Native WebSocket sends no Origin header at all — there is no browser
+// client to protect against (docs/ADR/ADR-007.md, the web client was cancelled), so an
+// absent Origin is the real client and is always allowed. When an Origin is present
+// (some other kind of caller) it's checked against the same allowlist httpx.CORS uses:
+// an empty allowlist allows it too, matching CORS's own empty-list dev default, since
+// CORS itself has no say here — there is no preflight and no browser enforcing a
+// response header on a WebSocket upgrade.
+func (h *Hub) checkOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	if h.allowAll {
+		return true
+	}
+	_, ok := h.allowedOrigins[origin]
+	return ok
 }
 
 // CreateRide mints a fresh join code and reserves the room for it right away — unlike
@@ -164,7 +201,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, req *http.Request) {
 		id = genID()
 	}
 
-	conn, err := upgrader.Upgrade(w, req, nil)
+	conn, err := h.upgrader.Upgrade(w, req, nil)
 	if err != nil {
 		return // upgrader already wrote the HTTP error
 	}
@@ -217,12 +254,14 @@ func (h *Hub) ServeWS(w http.ResponseWriter, req *http.Request) {
 		delete(room.riders, c.id)
 		close(old.send) // its writePump exits, closes the conn, which ends its readPump
 
-		// TODO(you): carry the old fix over, or not?
-		//   c.lat, c.lng, c.speed, c.lastSeen = old.lat, old.lng, old.speed, old.lastSeen
-		// Leaving this out means the rider vanishes from every other phone until their
-		// next GPS fix, because broadcast skips clients with a zero lastSeen. Carrying
-		// it over keeps the dot in place with a climbing ageSec instead. Product call
-		// (docs/PRODUCT.md, Confidence) — left for the repo owner.
+		// Carry the fix over. Without this, broadcast skips the reconnecting rider
+		// entirely (it skips any client with a zero lastSeen), so the rider vanishes
+		// from every other phone until their next GPS fix lands. Carrying it over
+		// instead holds the dot in place with a climbing ageSec, which the client's
+		// isStale() greys out past ~10s — ageSec exists in the protocol precisely to
+		// carry "last seen N seconds ago". A stale-marked position is more honest than
+		// no position at all (docs/PRODUCT.md, Confidence). Product call: carry it over.
+		c.lat, c.lng, c.speed, c.lastSeen = old.lat, old.lng, old.speed, old.lastSeen
 	}
 	room.riders[c.id] = c
 	h.mu.Unlock()

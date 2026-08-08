@@ -56,7 +56,7 @@ func newTestServer(t *testing.T, origins []string, orsClient *ors.Client) (*http
 	if orsClient == nil {
 		orsClient = ors.New("", nil)
 	}
-	srv := httptest.NewServer(buildHandler(logger, origins, hub.New(), orsClient))
+	srv := httptest.NewServer(buildHandler(logger, origins, hub.New(origins), orsClient))
 	t.Cleanup(srv.Close)
 	return srv, buf
 }
@@ -161,7 +161,7 @@ func TestCreateRideThroughChain(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
-	// HZ-001's behaviour must survive the two new middlewares.
+	// CORS behaviour must survive the two new middlewares.
 	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != testOrigin {
 		t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, testOrigin)
 	}

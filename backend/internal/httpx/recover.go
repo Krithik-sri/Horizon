@@ -17,13 +17,12 @@ import (
 //
 // # Scope: HTTP handlers only
 //
-// This recovers panics on the HTTP handler goroutine and nothing else. The hub runs
-// three families of goroutine outside that chain — Room.run, Client.readPump and
-// Client.writePump — and a panic in any of them still terminates the process, because
-// an unrecovered panic in any goroutine does. Recovering those is deliberately left to
-// the hub tasks that rewrite that code (HZ-009 through HZ-012); doing it here would mean
-// editing files those tasks are about to rewrite, and a half-recovered pump that keeps
-// looping on corrupt state is worse than a clean crash.
+// This recovers panics on the HTTP handler goroutine and nothing else. Room itself has no
+// goroutine of its own (hub.Room is plain data, guarded by Hub.mu — see hub/room.go) but
+// Client.readPump and Client.writePump each run on their own goroutine outside this chain,
+// and a panic in either still terminates the process, because an unrecovered panic in any
+// goroutine does. Recovering those is left for whenever that becomes a real problem; a
+// half-recovered pump that keeps looping on corrupt state is worse than a clean crash.
 func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import { getRiderId } from '@/core/riderId';
+import { getRiderId, saveRiderName } from '@/core/riderId';
 import { fetchRoute, type FetchRouteError, type Waypoint } from '@/core/route';
 import { connect, type ConnStatus, type LocFix, type WsHandle } from '@/core/wsClient';
 import type { Rider, RouteData, ServerMessage } from '@/core/models';
@@ -55,6 +55,10 @@ export const useRide = create<RideState>()((set, get) => ({
     get().leave(); // drop any existing connection first
 
     const riderId = await getRiderId();
+    // Saved so ride/[code].tsx can rejoin on its own — a deep link, Fast Refresh
+    // remount, or Android killing the backgrounded app all skip this join() call.
+    // The code comes from the route param there; only the name needs remembering.
+    await saveRiderName(name);
     set({ code, ownId: riderId, ownFix: null, riders: [], route: null, routeError: null });
 
     handle = connect({

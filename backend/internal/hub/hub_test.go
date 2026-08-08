@@ -34,7 +34,7 @@ func dialRide(t *testing.T, srv *httptest.Server, code, rider string) *websocket
 // the old client's own cleanup (its readPump defer, which fires later and
 // asynchronously once its connection is closed) must not undo that replacement.
 func TestRejoinEvictsGhostNotReplacement(t *testing.T) {
-	h := newHub()
+	h := newHub(nil)
 	srv := httptest.NewServer(http.HandlerFunc(h.ServeWS))
 	defer srv.Close()
 
@@ -103,8 +103,50 @@ func TestRejoinEvictsGhostNotReplacement(t *testing.T) {
 	}
 }
 
+// TestReconnectCarriesOverLastFix covers the product decision recorded in ServeWS's
+// eviction block: a rider reconnecting under the same id inherits the evicted
+// connection's last known position rather than starting blank until their next GPS fix.
+func TestReconnectCarriesOverLastFix(t *testing.T) {
+	h := newHub(nil)
+	srv := httptest.NewServer(http.HandlerFunc(h.ServeWS))
+	defer srv.Close()
+
+	code := h.CreateRide()
+	if code == "" {
+		t.Fatal("CreateRide returned empty code")
+	}
+	const riderID = "carryover1"
+
+	conn1 := dialRide(t, srv, code, riderID)
+	defer conn1.Close()
+
+	if err := conn1.WriteJSON(locMsg{Type: "loc", Lat: 12.97, Lng: 77.59, Speed: 6.2, Ts: time.Now().Unix()}); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond)
+
+	h.mu.Lock()
+	old := h.rooms[code].riders[riderID]
+	h.mu.Unlock()
+	if old == nil || old.lastSeen.IsZero() {
+		t.Fatal("first client's fix was not recorded")
+	}
+
+	// Reconnect with the same rider id — the eviction path under test.
+	conn2 := dialRide(t, srv, code, riderID)
+	defer conn2.Close()
+
+	h.mu.Lock()
+	next := h.rooms[code].riders[riderID]
+	h.mu.Unlock()
+	if next.lat != old.lat || next.lng != old.lng || next.speed != old.speed || !next.lastSeen.Equal(old.lastSeen) {
+		t.Errorf("reconnect did not carry over the last fix: got {%v %v %v %v}, want {%v %v %v %v}",
+			next.lat, next.lng, next.speed, next.lastSeen, old.lat, old.lng, old.speed, old.lastSeen)
+	}
+}
+
 func TestServeWSUnknownCodeReturns404(t *testing.T) {
-	h := newHub()
+	h := newHub(nil)
 	srv := httptest.NewServer(http.HandlerFunc(h.ServeWS))
 	defer srv.Close()
 
@@ -123,7 +165,7 @@ func TestServeWSUnknownCodeReturns404(t *testing.T) {
 }
 
 func TestServeWSMintedCodeUpgradesAndWelcomes(t *testing.T) {
-	h := newHub()
+	h := newHub(nil)
 	srv := httptest.NewServer(http.HandlerFunc(h.ServeWS))
 	defer srv.Close()
 
@@ -160,7 +202,7 @@ func TestServeWSMintedCodeUpgradesAndWelcomes(t *testing.T) {
 }
 
 func TestSweepCollectsOnlyRoomsEmptyPastGrace(t *testing.T) {
-	h := newHub()
+	h := newHub(nil)
 	base := time.Now()
 
 	occupied := h.CreateRide()
@@ -207,7 +249,7 @@ func TestSweepCollectsOnlyRoomsEmptyPastGrace(t *testing.T) {
 }
 
 func TestSetRouteUnknownCodeReturnsFalse(t *testing.T) {
-	h := newHub()
+	h := newHub(nil)
 	if h.SetRoute("NOTMINTED", []byte(`{"type":"route"}`)) {
 		t.Error("SetRoute returned true for a code that was never minted")
 	}
@@ -217,7 +259,7 @@ func TestSetRouteUnknownCodeReturnsFalse(t *testing.T) {
 // (a) survives sweeps that don't collect the room, and (b) goes away only because the
 // whole room does, at roomGrace — there is no separate expiry of the route itself.
 func TestSetRouteSurvivesUntilRoomGCd(t *testing.T) {
-	h := newHub()
+	h := newHub(nil)
 	base := time.Now()
 
 	code := h.CreateRide()
@@ -252,7 +294,7 @@ func TestSetRouteSurvivesUntilRoomGCd(t *testing.T) {
 }
 
 func TestSetRouteDoesNotResetEmptySince(t *testing.T) {
-	h := newHub()
+	h := newHub(nil)
 	code := h.CreateRide()
 	if code == "" {
 		t.Fatal("CreateRide returned empty code")
@@ -276,7 +318,7 @@ func TestSetRouteDoesNotResetEmptySince(t *testing.T) {
 }
 
 func TestCreateRideCodesAreDistinct(t *testing.T) {
-	h := newHub()
+	h := newHub(nil)
 	seen := make(map[string]bool, 500)
 	for i := 0; i < 500; i++ {
 		code := h.CreateRide()
@@ -303,7 +345,7 @@ func TestCreateRideCodesAreDistinct(t *testing.T) {
 // runs concurrently on its own goroutine, exercising registration, eviction, the loc
 // write path, and room GC all racing against each other.
 func TestConcurrentJoinSendDisconnect(t *testing.T) {
-	h := newHub()
+	h := newHub(nil)
 	srv := httptest.NewServer(http.HandlerFunc(h.ServeWS))
 	defer srv.Close()
 
@@ -352,4 +394,37 @@ func TestConcurrentJoinSendDisconnect(t *testing.T) {
 	riders.Wait()
 	close(stop)
 	sweepDone.Wait()
+}
+
+// TestCheckOrigin covers the three cases in checkOrigin's doc comment: no client of
+// ours ever sends an Origin header, so that case must always pass regardless of the
+// allowlist; a present Origin is then checked against it.
+func TestCheckOrigin(t *testing.T) {
+	h := newHub([]string{"http://localhost:8081"})
+
+	noOrigin := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	if !h.checkOrigin(noOrigin) {
+		t.Error("no Origin header (the native RN client) must be allowed")
+	}
+
+	allowed := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	allowed.Header.Set("Origin", "http://localhost:8081")
+	if !h.checkOrigin(allowed) {
+		t.Error("origin present in the allowlist must be allowed")
+	}
+
+	disallowed := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	disallowed.Header.Set("Origin", "http://evil.example")
+	if h.checkOrigin(disallowed) {
+		t.Error("origin absent from a non-empty allowlist must be rejected")
+	}
+}
+
+func TestCheckOriginEmptyAllowlistAllowsAnyOrigin(t *testing.T) {
+	h := newHub(nil)
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	req.Header.Set("Origin", "http://anything.example")
+	if !h.checkOrigin(req) {
+		t.Error("an empty allowlist is the dev default and must allow any origin")
+	}
 }

@@ -75,6 +75,24 @@ export default function DepartureScreen() {
     }
   }, [status, startState, startCode]);
 
+  // Start flow: if the backend is unreachable after POST /rides succeeded, connect()
+  // just keeps looping connecting/reconnecting with backoff — no 'rejected' ever
+  // arrives, so "Start Riding" would stay disabled forever with no explanation. Bail
+  // after 10s if we still haven't reached 'open'. Deps deliberately exclude `status` —
+  // this timer runs once per confirm attempt, not once per connecting/reconnecting
+  // flicker, and checks the live status only when it fires.
+  useEffect(() => {
+    if (startState !== 'confirm' || !startCode) return;
+    const timer = setTimeout(() => {
+      if (useRide.getState().status === 'open') return; // connected in time
+      setStartError("Couldn't reach the ride server.");
+      useRide.getState().leave();
+      setStartState('idle');
+      setStartCode(null);
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [startState, startCode]);
+
   // Join flow: watch connection status once join() has been called for a typed code.
   useEffect(() => {
     if (joinState !== 'connecting') return;
@@ -86,6 +104,19 @@ export default function DepartureScreen() {
       setJoinState('idle');
     }
   }, [status, joinState, joinCode, router]);
+
+  // Join flow: same timeout guard as the start flow above — an unreachable backend
+  // would otherwise leave the Join button stuck on "Connecting…" forever.
+  useEffect(() => {
+    if (joinState !== 'connecting') return;
+    const timer = setTimeout(() => {
+      if (useRide.getState().status === 'open') return;
+      setJoinError("Couldn't reach the ride server.");
+      useRide.getState().leave();
+      setJoinState('idle');
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [joinState]);
 
   async function handleStart() {
     setStartError(null);

@@ -76,7 +76,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:    ":" + port,
-		Handler: buildHandler(logger, origins, hub.New(), orsClient),
+		Handler: buildHandler(logger, origins, hub.New(origins), orsClient),
 
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,

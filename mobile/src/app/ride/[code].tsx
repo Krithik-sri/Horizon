@@ -1,10 +1,12 @@
 import { useEffect } from 'react';
 import { Text, View } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Location from 'expo-location';
-import { useKeepAwake } from 'expo-keep-awake';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
 import { color, type } from '@/design/tokens';
+import { loadRiderName } from '@/core/riderId';
+import type { FetchRouteError } from '@/core/route';
 import { useRide } from '@/state/useRide';
 import AheadCue from '@/features/motion/AheadCue';
 import HorizonLine from '@/features/motion/HorizonLine';
@@ -12,6 +14,10 @@ import SpeedReadout from '@/features/motion/SpeedReadout';
 import MapCanvas from '@/features/convoy/MapCanvas';
 import RiderMarkers from '@/features/convoy/RiderMarkers';
 import RouteLine from '@/features/convoy/RouteLine';
+
+// Stable tag for this screen's keep-awake lock, paired with the manual
+// activate/deactivate below (see the effect in RideScreen for why not useKeepAwake).
+const KEEP_AWAKE_TAG = 'horizon-ride';
 
 /** "Reconnecting…" / "Connection lost" — ambient, absent entirely when the
  * connection is healthy (rule: stale positions must never be presented as live). */
@@ -21,16 +27,68 @@ function ambientStatusText(status: ReturnType<typeof useRide.getState>['status']
   return null;
 }
 
+/** A failed setDestination is otherwise invisible — the map just doesn't change.
+ * Ambient text only, the lowest rung of the attention ladder (horizon-design SKILL.md). */
+function routeErrorText(error: FetchRouteError | null): string | null {
+  switch (error) {
+    case 'no-route':
+      return 'No route found.';
+    case 'unavailable':
+    case 'upstream-failed':
+      return 'Route unavailable.';
+    case 'network':
+      return "Couldn't reach the route service.";
+    default:
+      return null; // unknown-ride / bad-waypoints: not reachable from a long-press in practice
+  }
+}
+
 export default function RideScreen() {
-  // Code is display/use only — the store is already connected from Departure's join().
-  useLocalSearchParams<{ code: string }>();
-  useKeepAwake();
+  const router = useRouter();
+  const { code } = useLocalSearchParams<{ code: string }>();
+
+  // useKeepAwake() throws an unhandled rejection on unmount once the activity is gone
+  // (ExpoKeepAwake.deactivate — "the current activity is no longer available"). Both
+  // halves are exported by expo-keep-awake; catching each side directly avoids it.
+  useEffect(() => {
+    activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
+    return () => {
+      deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => {});
+    };
+  }, []);
 
   const riders = useRide((s) => s.riders);
   const ownId = useRide((s) => s.ownId);
   const ownFix = useRide((s) => s.ownFix);
   const route = useRide((s) => s.route);
+  const routeError = useRide((s) => s.routeError);
   const status = useRide((s) => s.status);
+
+  // Self-connect: a deep link, Fast Refresh remount, or Android killing the
+  // backgrounded app can land here without Departure ever having called join() (CLAUDE.md
+  // W3). Rejoin from the last saved session rather than sitting on a live-looking map
+  // with no connection.
+  useEffect(() => {
+    if (useRide.getState().code === code) return; // already connected to this ride
+    (async () => {
+      const name = await loadRiderName();
+      if (!name) {
+        router.replace('/');
+        return;
+      }
+      useRide.getState().join(code, name);
+    })();
+  }, [code, router]);
+
+  // A rejected (re)join means the code is gone — rooms are GC'd 5 min after the last
+  // rider leaves (CLAUDE.md). Retrying is pointless, so bail to Departure instead of
+  // sitting on a dead screen; leave() also clears the saved session so we don't try
+  // this same dead code again next launch.
+  useEffect(() => {
+    if (status !== 'rejected') return;
+    useRide.getState().leave();
+    router.replace('/');
+  }, [status, router]);
 
   useEffect(() => {
     let subscription: Location.LocationSubscription | null = null;
@@ -74,7 +132,9 @@ export default function RideScreen() {
     ]);
   }
 
-  const ambientText = ambientStatusText(status);
+  // Connection status takes precedence — a dead socket is the more important fact,
+  // and it's ambient text either way so only one line ever shows at once.
+  const ambientText = ambientStatusText(status) ?? routeErrorText(routeError);
 
   return (
     <View style={{ flex: 1, backgroundColor: color.surface.void }}>

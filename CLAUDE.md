@@ -95,10 +95,13 @@ docs/      all project documentation (index: docs/README.md)
 
 ## Status
 
-Early. `mobile/` is currently **empty of app code** — the Expo template was deleted in the v2
-pivot and the app is scaffolded fresh. The backend has a hardened hub (reconnect-safe, reserved
-join codes, empty-room GC — `docs/ADR/ADR-010.md`) and a working ORS route proxy that pushes a
-`route` message to the room (`docs/ADR/ADR-011.md`). Voice remains stubbed `501`.
+Early, and **unproven on a real device**. `mobile/src/` has two working Expo Router screens
+(Departure at `src/app/index.tsx`, Motion at `src/app/ride/[code].tsx`), a design-token system, a
+WebSocket client with jittered backoff, and zustand ride state — it type-checks clean and a debug
+APK has been built, but Phases 0–2 below are code-complete, not field-tested. The backend has a
+hardened hub (reconnect-safe, reserved join codes, empty-room GC — `docs/ADR/ADR-010.md`) and a
+working ORS route proxy that pushes a `route` message to the room (`docs/ADR/ADR-011.md`). Voice
+remains stubbed `501`.
 
 Build order:
 0. App shell + design tokens; own dot on the map (Motion register).
@@ -183,8 +186,9 @@ last rider leaves.
   writing app code.
 - **Go:** standard library first; keep packages under `internal/`; gofmt + vet clean.
 - **TypeScript:** functional components + hooks; zustand for shared ride state; feature-first
-  folders mirroring the registers (`src/features/{departure,motion,return,convoy}/`); no class
-  components.
+  folders mirroring the registers (`src/features/{departure,motion,return,convoy}/`; only
+  `convoy/` and `motion/` exist so far — Departure still lives inline in `src/app/index.tsx`); no
+  class components.
 - **Background location** is an OS-permissions problem (iOS "Always", Android foreground service),
   identical on every framework — treat it as Phase 4, not a quick add.
 - Throttle GPS to ~1 Hz; the app must reconnect with backoff (mobile networks drop).

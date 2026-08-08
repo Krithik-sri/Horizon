@@ -47,6 +47,14 @@ Everything else goes straight to a branch. Most work does not need an ADR.
 | [010](./ADR-010.md) | **One hub lock and one broadcast sweep**, not one goroutine per room | Accepted | Concurrent live rides reach the hundreds — shard the lock per room |
 | [011](./ADR-011.md) | **Navigation is a first-class capability** — route line + turn-by-turn, amending 003 and 006 | Accepted | Off-route rerouting, spoken guidance, or destination search become their own decisions |
 
+## Retired task scheme
+
+`cde311f` ("repo overhaul") deleted `docs/ROADMAP.md` and `docs/MASTER_TASKS.md`, which defined the
+`HZ-n` task-id scheme and the `M1`–`M5` milestones. Several ADRs cite those ids in their Context,
+Consequences, or Future Revisions sections. Per the append-only rule above, those records are not
+being edited — the ids are historical and intentionally left dangling. `docs/SYSTEM_DESIGN.md` §11
+(Phases 0–4) is now the only live roadmap.
+
 ## Template
 
 ````markdown
