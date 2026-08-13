@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -69,12 +70,28 @@ const fakeORSSuccessBody = `{"features":[{"geometry":{"coordinates":[[77.5,12.9]
 	`{"distance":100,"duration":10,"type":1,"instruction":"Head north","name":"NH 44","way_points":[0,1]}` +
 	`]}]}}]}`
 
+// fakeORSMultiFeatureBody stands in for an ORS alternatives response: two routes with
+// distinguishable summaries (100 vs 130), in a fixed order, so tests can tell which one
+// a response or a broadcast frame actually carries.
+const fakeORSMultiFeatureBody = `{"features":[` +
+	`{"geometry":{"coordinates":[[77.5,12.9],[77.6,13.0]]},"properties":{"summary":{"distance":100,"duration":10},` +
+	`"segments":[{"steps":[{"distance":100,"duration":10,"type":1,"instruction":"Head north","name":"NH 44","way_points":[0,1]}]}]}},` +
+	`{"geometry":{"coordinates":[[77.51,12.91],[77.62,13.02]]},"properties":{"summary":{"distance":130,"duration":13},` +
+	`"segments":[{"steps":[{"distance":130,"duration":13,"type":1,"instruction":"Head northeast","name":"SH 17","way_points":[0,1]}]}]}}` +
+	`]}`
+
 // postRoute POSTs to /rides/{code}/route. No Origin header — like the Android app, and
 // like mintRideCode's own default use here, this exercises the native-client path
 // through CORS (see httpx.CORS), not the browser one.
 func postRoute(t *testing.T, srv *httptest.Server, code, body string) *http.Response {
 	t.Helper()
-	resp, err := srv.Client().Post(srv.URL+"/rides/"+code+"/route", "application/json", strings.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/rides/"+code+"/route", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+testToken(t, "route-caller"))
+	resp, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatalf("POST /rides/%s/route: %v", code, err)
 	}
@@ -82,12 +99,14 @@ func postRoute(t *testing.T, srv *httptest.Server, code, body string) *http.Resp
 }
 
 // dialWS dials /ws for code, consumes the welcome frame, and returns the connection.
-// A near-duplicate of internal/hub's dialRide test helper — not reusable across
-// packages, and short enough not to be worth exporting just for this.
+// rider becomes the JWT subject on the bearer token presented at dial time — it is no
+// longer a query parameter. A near-duplicate of internal/hub's dialRide test helper —
+// not reusable across packages, and short enough not to be worth exporting just for
+// this.
 func dialWS(t *testing.T, srv *httptest.Server, code, rider string) *websocket.Conn {
 	t.Helper()
-	u := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ride=" + code + "&rider=" + rider
-	conn, _, err := websocket.DefaultDialer.Dial(u, nil)
+	u := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ride=" + code
+	conn, _, err := websocket.DefaultDialer.Dial(u, bearerHeader(t, rider))
 	if err != nil {
 		t.Fatalf("dial %s: %v", u, err)
 	}
@@ -96,6 +115,30 @@ func dialWS(t *testing.T, srv *httptest.Server, code, rider string) *websocket.C
 		t.Fatalf("reading welcome: %v", err)
 	}
 	return conn
+}
+
+// readFrameOfType reads WS messages off conn until one with the given "type" field
+// arrives, skipping anything else. That "anything else" is chiefly the hub's periodic
+// ~4Hz `state` heartbeat (internal/hub/room.go), which a connected test client
+// receives regardless of whether it has sent a position fix — a plain "read the next
+// message" would be racy against that tick. Bounded by a 2s deadline so a genuinely
+// missing frame still fails the test instead of hanging.
+func readFrameOfType(t *testing.T, conn *websocket.Conn, want string) []byte {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		conn.SetReadDeadline(deadline)
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("reading %s frame: %v", want, err)
+		}
+		var frame struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(data, &frame); err == nil && frame.Type == want {
+			return data
+		}
+	}
 }
 
 func manyWaypoints(n int) string {
@@ -119,18 +162,25 @@ func TestRouteHandlerSuccess(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 
-	var got routeData
+	var got routeListResponse
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatalf("decoding response: %v", err)
 	}
-	if len(got.Polyline) != 2 || got.Polyline[0] != [2]float64{77.5, 12.9} {
-		t.Errorf("polyline = %v, want the ORS coordinates unswapped", got.Polyline)
+	if len(got.Routes) != 1 {
+		t.Fatalf("routes = %+v, want exactly 1 (no alternatives requested)", got.Routes)
 	}
-	if len(got.Steps) != 1 || got.Steps[0].Name != "NH 44" {
-		t.Errorf("steps = %+v", got.Steps)
+	if got.Selected != 0 {
+		t.Errorf("selected = %d, want 0", got.Selected)
 	}
-	if got.Summary == nil || got.Summary.Distance != 100 {
-		t.Errorf("summary = %+v", got.Summary)
+	route := got.Routes[0]
+	if len(route.Polyline) != 2 || route.Polyline[0] != [2]float64{77.5, 12.9} {
+		t.Errorf("polyline = %v, want the ORS coordinates unswapped", route.Polyline)
+	}
+	if len(route.Steps) != 1 || route.Steps[0].Name != "NH 44" {
+		t.Errorf("steps = %+v", route.Steps)
+	}
+	if route.Summary == nil || route.Summary.Distance != 100 {
+		t.Errorf("summary = %+v", route.Summary)
 	}
 }
 
@@ -306,8 +356,8 @@ func TestLateJoinerReceivesRouteOnConnect(t *testing.T) {
 	// Dial manually rather than via dialWS: the assertion here is specifically about
 	// frame order — welcome first, route second — which dialWS's "consume and discard
 	// the welcome" helper would hide.
-	u := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ride=" + code + "&rider=latejoin1"
-	conn, _, err := websocket.DefaultDialer.Dial(u, nil)
+	u := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ride=" + code
+	conn, _, err := websocket.DefaultDialer.Dial(u, bearerHeader(t, "latejoin1"))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -333,4 +383,193 @@ func TestLateJoinerReceivesRouteOnConnect(t *testing.T) {
 		t.Fatalf("reading route frame: %v", err)
 	}
 	assertRouteFrame(t, routeFrameData, code)
+}
+
+// --- ADR-013: preview, alternatives, index ---
+
+func TestRouteHandlerPreviewDoesNotBroadcast(t *testing.T) {
+	fakeORS := httptest.NewServer(fakeORSHandler(http.StatusOK, fakeORSSuccessBody))
+	defer fakeORS.Close()
+	srv, _ := newTestServer(t, nil, newORSClient(t, fakeORS))
+	code := mintRideCode(t, srv, "")
+
+	conn := dialWS(t, srv, code, "previewer1")
+	defer conn.Close()
+
+	resp := postRoute(t, srv, code, `{"waypoints":[[12.9,77.5],[13.0,77.6]],"preview":true}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST route status = %d, want 200", resp.StatusCode)
+	}
+	var got routeListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if len(got.Routes) != 1 || got.Selected != 0 {
+		t.Errorf("response = %+v, want one route and selected 0", got)
+	}
+
+	// A route was returned to the caller, but the room must never have been touched:
+	// no rider (including the caller's own connection) receives a `route` frame. There
+	// is no positive event to wait for, so this drains whatever arrives in a short
+	// window and fails only if a `route` frame shows up among it — a plain "expect
+	// ReadMessage to time out" would also incorrectly fail on the hub's own `state`
+	// heartbeat.
+	conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	for {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			return // deadline hit with nothing but (at most) state frames — success
+		}
+		var frame struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(data, &frame); err == nil && frame.Type == "route" {
+			t.Fatalf("preview request must not broadcast a route frame, got %s", data)
+		}
+	}
+}
+
+func TestRouteHandlerNonPreviewBroadcastsSelectedIndex(t *testing.T) {
+	fakeORS := httptest.NewServer(fakeORSHandler(http.StatusOK, fakeORSMultiFeatureBody))
+	defer fakeORS.Close()
+	srv, _ := newTestServer(t, nil, newORSClient(t, fakeORS))
+	code := mintRideCode(t, srv, "")
+
+	conn := dialWS(t, srv, code, "selector1")
+	defer conn.Close()
+
+	resp := postRoute(t, srv, code, `{"waypoints":[[12.9,77.5],[13.0,77.6]],"alternatives":true,"index":1}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST route status = %d, want 200", resp.StatusCode)
+	}
+	var got routeListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if len(got.Routes) != 2 {
+		t.Fatalf("routes = %+v, want 2 (the fixture has 2 features)", got.Routes)
+	}
+	if got.Selected != 1 {
+		t.Errorf("selected = %d, want 1", got.Selected)
+	}
+
+	data := readFrameOfType(t, conn, "route")
+	var frame struct {
+		Summary struct {
+			Distance float64 `json:"distance"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal(data, &frame); err != nil {
+		t.Fatalf("route frame is not JSON: %q: %v", data, err)
+	}
+	if frame.Summary.Distance != got.Routes[1].Summary.Distance {
+		t.Errorf("broadcast summary.distance = %v, want routes[1]'s %v (routes[0]'s is %v — broadcast the unselected route)",
+			frame.Summary.Distance, got.Routes[1].Summary.Distance, got.Routes[0].Summary.Distance)
+	}
+}
+
+func TestRouteHandlerIndexOutOfRangeReturns400(t *testing.T) {
+	fakeORS := httptest.NewServer(fakeORSHandler(http.StatusOK, fakeORSSuccessBody))
+	defer fakeORS.Close()
+	srv, _ := newTestServer(t, nil, newORSClient(t, fakeORS))
+	code := mintRideCode(t, srv, "")
+
+	// The fixture has exactly one feature — index 1 is out of range for it.
+	resp := postRoute(t, srv, code, `{"waypoints":[[12.9,77.5],[13.0,77.6]],"index":1}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestRouteHandlerAlternativesOmittedForFarWaypoints(t *testing.T) {
+	var gotORSBody []byte
+	fakeORS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		gotORSBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("reading fake ORS request body: %v", err)
+		}
+		w.Write([]byte(fakeORSSuccessBody))
+	}))
+	defer fakeORS.Close()
+	srv, _ := newTestServer(t, nil, newORSClient(t, fakeORS))
+	code := mintRideCode(t, srv, "")
+
+	// [12.9,77.5] to [20,85] is roughly 900km apart by haversine — comfortably over
+	// the 60km straight-line gate (ADR-013 §3).
+	resp := postRoute(t, srv, code, `{"waypoints":[[12.9,77.5],[20.0,85.0]],"alternatives":true}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST route status = %d, want 200", resp.StatusCode)
+	}
+	if strings.Contains(string(gotORSBody), "alternative_routes") {
+		t.Errorf("ORS request body = %s, want no alternative_routes for waypoints over the 60km gate", gotORSBody)
+	}
+}
+
+// fakeORSRetryOnAlternatives rejects any request that carries alternative_routes with
+// a plain 400 (standing in for ORS refusing an alternatives search whose route turns
+// out too long by road) and answers every other request with fakeORSSuccessBody. It's
+// stateless — the decision is a pure function of each request's own body — so it works
+// whether route.go's retry hits the same underlying connection or not.
+func fakeORSRetryOnAlternatives(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	if strings.Contains(string(body), "alternative_routes") {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"alternative routes not available for this route"}`))
+		return
+	}
+	w.Write([]byte(fakeORSSuccessBody))
+}
+
+func TestRouteHandlerRetriesWithoutAlternativesOn4xx(t *testing.T) {
+	fakeORS := httptest.NewServer(http.HandlerFunc(fakeORSRetryOnAlternatives))
+	defer fakeORS.Close()
+	srv, _ := newTestServer(t, nil, newORSClient(t, fakeORS))
+	code := mintRideCode(t, srv, "")
+
+	resp := postRoute(t, srv, code, `{"waypoints":[[12.9,77.5],[13.0,77.6]],"alternatives":true}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST route status = %d, want 200 (retry without alternatives should have succeeded): %s", resp.StatusCode, body)
+	}
+	var got routeListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if len(got.Routes) != 1 {
+		t.Errorf("routes = %+v, want 1 (the retry's fixture has a single feature)", got.Routes)
+	}
+}
+
+// The retry above must not fire on a quota error. A 403/429 is the one failure where a
+// second attempt is actively harmful: it spends another request against the very ceiling
+// the alternatives gate exists to protect, and a 429 specifically means send less, not
+// more. This asserts the request count, not just the status code — a retrying
+// implementation still returns 503 here, so status alone would not catch the regression.
+func TestRouteHandlerDoesNotRetryOnQuota(t *testing.T) {
+	var calls atomic.Int64
+	fakeORS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":"rate limit exceeded"}`))
+	}))
+	defer fakeORS.Close()
+	srv, _ := newTestServer(t, nil, newORSClient(t, fakeORS))
+	code := mintRideCode(t, srv, "")
+
+	// Two waypoints well under the 60km gate, so alternatives really are requested and
+	// the retry branch is reachable at all.
+	resp := postRoute(t, srv, code, `{"waypoints":[[12.9,77.5],[13.0,77.6]],"alternatives":true}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", resp.StatusCode)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Errorf("ORS calls = %d, want 1 — a quota error must not be retried", got)
+	}
 }
