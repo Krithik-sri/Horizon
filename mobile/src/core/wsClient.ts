@@ -1,5 +1,7 @@
 import { BASE_URL, WS_BASE_URL } from './config';
 import type { ServerMessage } from './models';
+import { getAccessToken, supabase } from './supabase';
+import { backoffDelayCapMs, shouldPrecheck, shouldSendLoc } from './wsProtocol';
 
 /**
  * Connection status, exposed so the UI can honour PRODUCT.md's Confidence pillar
@@ -20,7 +22,6 @@ export type LocFix = {
 export type ConnectOptions = {
   code: string;
   name: string;
-  riderId: string;
   onMessage: (msg: ServerMessage) => void;
   onStatus: (status: ConnStatus) => void;
 };
@@ -32,28 +33,12 @@ export type WsHandle = {
   close: () => void;
 };
 
-export const MIN_LOC_INTERVAL_MS = 1000; // throttle outbound `loc` to ~1 Hz
-const BASE_BACKOFF_MS = 500;
-export const MAX_BACKOFF_MS = 15000; // cap on reconnect delay
-
-/**
- * Deterministic upper bound for the reconnect delay before a given attempt (1-based).
- * Exponential, capped at MAX_BACKOFF_MS. The actual delay used by connect() applies
- * full jitter on top of this (Math.random() * cap) so a batch of clients dropped by
- * the same network hiccup doesn't all reconnect in lockstep. Exported (pure, no
- * randomness) so wsClient.check.ts can assert the schedule without mocking timers.
- */
-export function backoffDelayCapMs(attempt: number): number {
-  return Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** attempt);
-}
-
-/**
- * Whether a `loc` send at `now` should go out, given the last send at `lastSentAt`.
- * Exported (pure) for the same reason as backoffDelayCapMs — testable without a timer.
- */
-export function shouldSendLoc(lastSentAt: number, now: number): boolean {
-  return now - lastSentAt >= MIN_LOC_INTERVAL_MS;
-}
+/** See the cast site in open() below for why this exists. */
+type RNWebSocketCtor = new (
+  url: string,
+  protocols: undefined,
+  options: { headers: Record<string, string> },
+) => WebSocket;
 
 /**
  * Whether `code`'s room exists, checked with a plain HTTP GET against the same /ws
@@ -76,40 +61,45 @@ export function shouldSendLoc(lastSentAt: number, now: number): boolean {
  * a logged 400 on the server every time this runs (the room check passes, then the
  * upgrade fails because a plain GET carries no Upgrade headers), so a precheck on every
  * drop would fill the access log with 400s that mean "everything is fine".
+ *
+ * ADR-017 §4 adds a fourth outcome: 'unauthorized'. The Go server now requires a
+ * verified bearer token on this route too, so a rejected precheck can mean either the
+ * ride code is gone OR the token is. A single 401 gets exactly one retry, after a
+ * *forced* session refresh (not just re-reading the cached session — the whole point
+ * is the cached token is the one that just failed): a second consecutive 401 means the
+ * token is not the problem, or refreshing can't fix it, and either way retrying
+ * forever gets us nowhere. The caller treats 'unauthorized' the same as 'not-found' —
+ * terminal, surfaced as 'rejected'.
  */
-async function checkRideExists(code: string): Promise<'exists' | 'not-found' | 'unknown'> {
-  try {
-    const res = await fetch(`${BASE_URL}/ws?ride=${encodeURIComponent(code)}`);
-    return res.status === 404 ? 'not-found' : 'exists';
-  } catch {
-    return 'unknown'; // network failure — can't tell either way, let the caller retry as usual
-  }
-}
+async function checkRideExists(code: string): Promise<'exists' | 'not-found' | 'unauthorized' | 'unknown'> {
+  const attemptOnce = async (): Promise<'exists' | 'not-found' | 'unauthorized' | 'unknown'> => {
+    try {
+      const token = await getAccessToken();
+      const res = await fetch(`${BASE_URL}/ws?ride=${encodeURIComponent(code)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (res.status === 401) return 'unauthorized';
+      return res.status === 404 ? 'not-found' : 'exists';
+    } catch {
+      return 'unknown'; // network failure — can't tell either way, let the caller retry as usual
+    }
+  };
 
-/**
- * Whether to spend an HTTP precheck before this attempt (0-based; 0 is the first connect).
- *
- * Only two moments are worth it:
- *   - the first attempt, so a mistyped or expired code fails fast with a real reason
- *     instead of retrying silently behind a spinner;
- *   - once backoff has saturated, meaning we've been failing for a while. If the server
- *     is reachable at that point, the likely cause is a room GC'd after its 5-minute
- *     empty grace — a dead code we should stop retrying rather than drain the battery on.
- *
- * Everything in between is an ordinary network drop, where the room is almost certainly
- * still there and a precheck buys nothing but a spurious 400 in the server log.
- */
-export function shouldPrecheck(attempt: number): boolean {
-  return attempt === 0 || backoffDelayCapMs(attempt) >= MAX_BACKOFF_MS;
+  const first = await attemptOnce();
+  if (first !== 'unauthorized') return first;
+
+  await supabase.auth.refreshSession(); // one forced refresh, not a loop — see doc comment above
+  return attemptOnce();
 }
 
 /**
  * Opens a connection to a ride room and keeps it alive.
  *
  * Reconnects on every drop with exponential backoff + jitter (mobile networks drop
- * constantly), except after an explicit close() or a 404 (unknown/expired ride code —
- * retrying that forever is a battery drain and a lie to the user, so it's surfaced as
- * the terminal 'rejected' status instead).
+ * constantly), except after an explicit close() or a 404/401 (unknown/expired ride
+ * code, or a token the server won't accept even after one refresh — retrying either
+ * forever is a battery drain and a lie to the user, so both are surfaced as the
+ * terminal 'rejected' status instead).
  */
 export function connect(opts: ConnectOptions): WsHandle {
   let ws: WebSocket | null = null;
@@ -137,18 +127,43 @@ export function connect(opts: ConnectOptions): WsHandle {
     if (shouldPrecheck(attempt)) {
       const exists = await checkRideExists(opts.code);
       if (closed) return;
-      if (exists === 'not-found') {
-        setStatus('rejected'); // terminal — do not retry an unminted/expired code
+      if (exists === 'not-found' || exists === 'unauthorized') {
+        setStatus('rejected'); // terminal — do not retry an unminted/expired code or a dead token
         return;
       }
     }
 
-    const url =
-      `${WS_BASE_URL}/ws?ride=${encodeURIComponent(opts.code)}` +
-      `&name=${encodeURIComponent(opts.name)}&rider=${encodeURIComponent(opts.riderId)}`;
-    // No auth today, so nothing sensitive rides in this URL — but never put a token in
-    // a query string even so: the server logs request URLs (CLAUDE.md).
-    const socket = new WebSocket(url);
+    // Fetched fresh on *every* attempt, never cached from an earlier open() or from
+    // connect()'s call site — this is the single most important sequencing detail in
+    // ADR-017 §4. A ride can run for hours; a token fetched once at the first connect
+    // would still be the one presented on a reconnect attempt long after it expired.
+    // getAccessToken() goes through getSession(), which auto-refreshes an expired
+    // token, so this is normally free (a cache read) and only occasionally a network
+    // call.
+    const token = await getAccessToken();
+    if (closed) return;
+
+    const url = `${WS_BASE_URL}/ws?ride=${encodeURIComponent(opts.code)}&name=${encodeURIComponent(opts.name)}`;
+    // The token rides in a header, not the query string (ADR-008, ADR-017). Note the
+    // reason usually given for that rule — "the server logs request URLs" — is false:
+    // internal/httpx/logging.go logs r.URL.Path only. The rule holds for the reason that
+    // does apply: a URL reaches proxies and CDN logs in a way a header doesn't.
+    // React Native's WebSocket takes a non-standard third `options` argument with a
+    // `headers` field for exactly this case (ADR-017 §2). `headers` is a required key
+    // of that options object even when there's nothing to send (no session yet — the
+    // ADR-016 "first launch had no network" case) — in that case the server's own 401
+    // is what surfaces, via the ordinary close-and-reconnect path.
+    //
+    // TypeScript doesn't know about this argument: this project has no
+    // @types/react-native, and lib.dom.d.ts's 2-arg WebSocket constructor wins by
+    // default (expo/tsconfig.base sets lib: ["DOM", "ESNext"]). RNWebSocketCtor is a
+    // narrow local view of the real (native, Flow-typed) constructor in
+    // react-native/Libraries/WebSocket/WebSocket.js — cast rather than augmented,
+    // since the global `WebSocket` is a `declare var` of an object-literal type, which
+    // declaration merging can't extend the way it can an `interface`.
+    const socket = new (WebSocket as unknown as RNWebSocketCtor)(url, undefined, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
     ws = socket;
 
     socket.onopen = () => {

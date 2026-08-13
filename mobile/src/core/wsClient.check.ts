@@ -1,14 +1,20 @@
 /**
- * Self-check for the two bits of wsClient.ts that would break silently if a refactor
- * changed their behaviour: the reconnect backoff schedule and the outbound `loc`
- * throttle. No test framework is installed for this project and none is added here —
- * this is a plain assert script, run with:
+ * Self-check for the two bits of wsClient.ts's connection policy that would break
+ * silently if a refactor changed their behaviour: the reconnect backoff schedule and
+ * the outbound `loc` throttle. No test framework is installed for this project and
+ * none is added here — this is a plain assert script, run with:
  *
  *   npx tsx src/core/wsClient.check.ts
  *
- * Everything else in wsClient.ts (the actual socket lifecycle, the 404 precheck) needs
- * a live server or a mocked fetch/WebSocket to exercise meaningfully — not worth a
- * framework for this project, so it's exercised by hand against the real backend
+ * Imports from ./wsProtocol, not ./wsClient: wsClient.ts now pulls in core/supabase.ts
+ * for a live token on every connection attempt, which imports `react-native`
+ * (AppState) — a module graph plain `tsx` cannot transform standalone. wsProtocol.ts
+ * is the pure split that keeps this check running the same way it always has; see its
+ * doc comment.
+ *
+ * Everything else in wsClient.ts (the actual socket lifecycle, the 404/401 precheck)
+ * needs a live server or a mocked fetch/WebSocket to exercise meaningfully — not worth
+ * a framework for this project, so it's exercised by hand against the real backend
  * instead.
  */
 import {
@@ -17,7 +23,7 @@ import {
   MIN_LOC_INTERVAL_MS,
   shouldPrecheck,
   shouldSendLoc,
-} from './wsClient';
+} from './wsProtocol';
 
 // No `node:assert` here — this project has no @types/node installed, and pulling it
 // in just for this one self-check isn't worth it (`npx tsc --noEmit` must stay clean

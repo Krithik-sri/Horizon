@@ -1,4 +1,4 @@
-import { BASE_URL } from './config';
+import { api } from './api';
 
 /** One geocoding hit. Plain data, not a wire type shared with models.ts — this is a
  * search result, never sent or received anywhere else in the protocol. */
@@ -26,9 +26,8 @@ export type SearchResult = { ok: true; places: Place[] } | { ok: false; error: S
 export async function searchPlaces(text: string, near?: { lat: number; lng: number }): Promise<SearchResult> {
   let res: Response;
   try {
-    res = await fetch(`${BASE_URL}/geocode`, {
+    res = await api('/geocode', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, near: near ? [near.lat, near.lng] : undefined }),
     });
   } catch {

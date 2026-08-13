@@ -1,45 +1,48 @@
-import { BASE_URL } from './config';
+import { api } from './api';
 import type { RouteData } from './models';
+import type { FetchRouteError, FetchRouteResult, Waypoint } from './route.pure';
 
-/**
- * [lat, lng] — the one request body in this protocol that's lat-first, matching
- * loc/state's named lat/lng field convention rather than route.polyline's [lng, lat]
- * order. Deliberately not `LngLat` (models.ts) — never mix the two up.
- */
-export type Waypoint = [number, number];
-
-export type FetchRouteError =
-  | 'unknown-ride' // 404 — the ride code is unknown or expired
-  | 'bad-waypoints' // 400 — malformed body or waypoints out of range/count
-  | 'no-route' // 422 — ORS found no route between the given points
-  | 'unavailable' // 503 — route service unconfigured or over its quota
-  | 'upstream-failed' // 502 — ORS itself failed
-  | 'network'; // fetch threw, or the server returned something unrecognised
-
-export type FetchRouteResult = { ok: true; route: RouteData } | { ok: false; error: FetchRouteError };
+// Re-exported so every existing import of '@/core/route' keeps working — see
+// route.pure.ts's doc comment for why the network-free half lives there instead.
+// routeErrorText and viaLabel (the value exports of that split) have no callers
+// left importing them from here — import them straight from './route.pure'.
+export type { FetchRouteError, FetchRouteResult, Waypoint };
 
 /**
  * POSTs waypoints to {base}/rides/{code}/route for the caller's immediate feedback.
  *
- * The same route also arrives over the WebSocket as a `route` message to everyone in
- * the room (route.go's SetRoute fans it out) — that WS message is the source of truth
- * every rider converges on. This HTTP response should be used for surfacing errors to
- * the caller, not as the value the UI renders a route from.
+ * `preview: true` (ADR-013 §1) fetches without storing or broadcasting to the room —
+ * the planner screen uses this for every stop/reorder edit. Omitted (the default),
+ * this commits: the resulting route is stored and reaches every rider over the
+ * WebSocket as a `route` message (route.go's SetRoute fans it out) — that WS message
+ * is the source of truth every rider converges on, so this HTTP response should be
+ * used for surfacing errors to the caller, not as the value the UI renders a route
+ * from. `alternatives: true` only works with exactly two waypoints (ADR-013 §3);
+ * `index` selects which returned route to commit and is ignored under `preview`.
  */
-export async function fetchRoute(code: string, waypoints: Waypoint[]): Promise<FetchRouteResult> {
+export async function fetchRoute(
+  code: string,
+  waypoints: Waypoint[],
+  opts?: { preview?: boolean; alternatives?: boolean; index?: number },
+): Promise<FetchRouteResult> {
   let res: Response;
   try {
-    res = await fetch(`${BASE_URL}/rides/${encodeURIComponent(code)}/route`, {
+    res = await api(`/rides/${encodeURIComponent(code)}/route`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ waypoints }),
+      body: JSON.stringify({
+        waypoints,
+        preview: opts?.preview ?? false,
+        alternatives: opts?.alternatives ?? false,
+        index: opts?.index ?? 0,
+      }),
     });
   } catch {
     return { ok: false, error: 'network' };
   }
 
   if (res.status === 200) {
-    return { ok: true, route: (await res.json()) as RouteData };
+    const data = (await res.json()) as { routes: RouteData[]; selected: number };
+    return { ok: true, routes: data.routes, selected: data.selected };
   }
 
   const byStatus: Record<number, FetchRouteError> = {
@@ -50,22 +53,4 @@ export async function fetchRoute(code: string, waypoints: Waypoint[]): Promise<F
     503: 'unavailable',
   };
   return { ok: false, error: byStatus[res.status] ?? 'network' };
-}
-
-/** A failed setDestination is otherwise invisible — the map just doesn't change.
- * Ambient text only, the lowest rung of the attention ladder (horizon-design SKILL.md).
- * Shared by ride/[code].tsx (long-press) and index.tsx (Departure search) — both
- * surface this through their own inline-error UI, not through this function. */
-export function routeErrorText(error: FetchRouteError | null): string | null {
-  switch (error) {
-    case 'no-route':
-      return 'No route found.';
-    case 'unavailable':
-    case 'upstream-failed':
-      return 'Route unavailable.';
-    case 'network':
-      return "Couldn't reach the route service.";
-    default:
-      return null; // unknown-ride / bad-waypoints: not reachable from a long-press in practice
-  }
 }
