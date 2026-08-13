@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -14,11 +16,50 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/krithik/horizon/backend/internal/auth"
 	"github.com/krithik/horizon/backend/internal/hub"
 	"github.com/krithik/horizon/backend/internal/ors"
 )
 
 const testOrigin = "http://localhost:8081"
+
+// testIssuer is the ES256 JWKS issuer every backend package-main test server verifies
+// against (see newTestServer) — started once for the whole test binary by TestMain,
+// since it owns a real httptest.Server. Not read from the environment: package-main
+// tests build the handler chain directly rather than through run(), so there is no env
+// var to read from — testIssuer.URL is the whole config.
+var testIssuer *auth.TestIssuer
+
+func TestMain(m *testing.M) {
+	issuer, err := auth.NewTestIssuer()
+	if err != nil {
+		panic(fmt.Sprintf("main_test: auth.NewTestIssuer: %v", err))
+	}
+	testIssuer = issuer
+
+	code := m.Run()
+	issuer.Server.Close()
+	os.Exit(code)
+}
+
+// testToken mints a valid Supabase-shaped ES256 access token for subject sub — the
+// ADR-017-mandated answer to "tokens are inconvenient in tests" (docs/ADR/ADR-017.md,
+// Future Revisions). Every test below that used to rely on an open /ws or an
+// unauthenticated HTTP route now carries one of these instead.
+func testToken(t *testing.T, sub string) string {
+	t.Helper()
+	tok, err := testIssuer.MintToken(sub)
+	if err != nil {
+		t.Fatalf("minting test token: %v", err)
+	}
+	return tok
+}
+
+// bearerHeader is the http.Header form of testToken, for the WebSocket dialer, which
+// takes headers rather than an *http.Request to set them on.
+func bearerHeader(t *testing.T, sub string) http.Header {
+	return http.Header{"Authorization": {"Bearer " + testToken(t, sub)}}
+}
 
 // syncBuffer is a bytes.Buffer that survives the server writing to it from a handler
 // goroutine while the test reads it. The plain buffer would be a data race.
@@ -49,14 +90,24 @@ func (b *syncBuffer) String() string {
 // orsClient may be nil for tests that never touch the route endpoint — it falls back
 // to an unconfigured client (blank key), which is enough to keep buildHandler happy
 // without any test needing to know that.
-func newTestServer(t *testing.T, origins []string, orsClient *ors.Client) (*httptest.Server, *syncBuffer) {
+//
+// lk is variadic rather than a plain parameter so the ~20 existing call sites that
+// predate voice-token don't all need touching: omitted, it defaults to an unconfigured
+// livekitConfig{} (voice-token 503s, same "not wired up" shape as a nil orsClient).
+// Only voice_test.go needs to pass one.
+func newTestServer(t *testing.T, origins []string, orsClient *ors.Client, lk ...livekitConfig) (*httptest.Server, *syncBuffer) {
 	t.Helper()
 	buf := &syncBuffer{}
 	logger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	if orsClient == nil {
 		orsClient = ors.New("", nil)
 	}
-	srv := httptest.NewServer(buildHandler(logger, origins, hub.New(origins), orsClient))
+	var lkConfig livekitConfig
+	if len(lk) > 0 {
+		lkConfig = lk[0]
+	}
+	verifier := auth.New(testIssuer.URL, nil)
+	srv := httptest.NewServer(buildHandler(logger, origins, hub.New(origins), orsClient, verifier, lkConfig))
 	t.Cleanup(srv.Close)
 	return srv, buf
 }
@@ -71,6 +122,7 @@ func mintRideCode(t *testing.T, srv *httptest.Server, origin string) string {
 		t.Fatalf("NewRequest: %v", err)
 	}
 	req.Header.Set("Origin", origin)
+	req.Header.Set("Authorization", "Bearer "+testToken(t, "ride-minter"))
 	resp, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatalf("POST /rides: %v", err)
@@ -92,8 +144,10 @@ func TestWebSocketUpgradeSurvivesMiddlewareChain(t *testing.T) {
 	srv, logs := newTestServer(t, []string{testOrigin}, nil)
 	code := mintRideCode(t, srv, testOrigin)
 
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ride=" + code + "&name=auditor&rider=aud12345"
-	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Origin": {testOrigin}})
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ride=" + code + "&name=auditor"
+	header := bearerHeader(t, "aud12345")
+	header.Set("Origin", testOrigin)
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, header)
 	if err != nil {
 		if resp != nil {
 			body, _ := io.ReadAll(resp.Body)
@@ -137,7 +191,8 @@ func TestWebSocketUpgradeSurvivesMiddlewareChain(t *testing.T) {
 	if got := line["status"]; got != float64(http.StatusSwitchingProtocols) {
 		t.Errorf("logged status = %v, want 101", got)
 	}
-	// The query carried a name and a rider id; neither may reach the log.
+	// The query carried a name, and the bearer token carried a rider id in its
+	// (base64, but readable) payload; neither may reach the log.
 	if out := logs.String(); strings.Contains(out, "auditor") || strings.Contains(out, "aud12345") {
 		t.Errorf("access log leaks identifying query parameters:\n%s", out)
 	}
@@ -151,6 +206,7 @@ func TestCreateRideThroughChain(t *testing.T) {
 		t.Fatalf("NewRequest: %v", err)
 	}
 	req.Header.Set("Origin", testOrigin)
+	req.Header.Set("Authorization", "Bearer "+testToken(t, "ride-creator"))
 
 	resp, err := srv.Client().Do(req)
 	if err != nil {

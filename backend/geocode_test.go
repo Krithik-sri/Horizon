@@ -16,7 +16,13 @@ const fakeGeocodeSuccessBody = `{"features":[{"geometry":{"coordinates":[77.68,1
 // postGeocode POSTs to /geocode. Mirrors postRoute in route_test.go.
 func postGeocode(t *testing.T, srv *httptest.Server, body string) *http.Response {
 	t.Helper()
-	resp, err := srv.Client().Post(srv.URL+"/geocode", "application/json", strings.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/geocode", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+testToken(t, "geocode-caller"))
+	resp, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatalf("POST /geocode: %v", err)
 	}

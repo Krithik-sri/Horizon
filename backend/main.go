@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/krithik/horizon/backend/internal/auth"
 	"github.com/krithik/horizon/backend/internal/httpx"
 	"github.com/krithik/horizon/backend/internal/hub"
 	"github.com/krithik/horizon/backend/internal/ors"
@@ -45,9 +46,27 @@ func main() {
 }
 
 func run() error {
+	// Before anything reads os.Getenv — including LOG_LEVEL on the next line, which is
+	// itself settable from .env. A real environment variable always wins over the file
+	// (see loadDotEnv), so this can't shadow what a deployment set. The outcome is
+	// logged a few lines down, once there's a logger to log it with: a .env that
+	// silently does nothing is exactly the failure this function exists to remove.
+	dotenvNames, dotenvErr := loadDotEnv(".env")
+
 	logger, levelErr := newLogger(os.Getenv("LOG_LEVEL"))
 	if levelErr != nil {
 		logger.Warn("invalid LOG_LEVEL, defaulting to info", "err", levelErr)
+	}
+
+	// Names only, never values — these are secrets. Saying which variables came from the
+	// file is what makes a partially-filled .env diagnosable at a glance instead of via a
+	// 503 an hour later. Silence here means there was no .env, which is the normal
+	// deployed case.
+	switch {
+	case dotenvErr != nil:
+		logger.Warn("could not read .env — falling back to the environment alone", "err", dotenvErr)
+	case len(dotenvNames) > 0:
+		logger.Info("loaded .env", "vars", dotenvNames)
 	}
 
 	// Read once, at startup: a misconfiguration surfaces at boot rather than on a
@@ -69,6 +88,46 @@ func run() error {
 	}
 	orsClient := ors.New(orsKey, nil)
 
+	// Same pattern again: read once, warn rather than fail. Voice is a feature, not
+	// an auth boundary — unlike SUPABASE_URL below, a blank LiveKit config degrades
+	// one endpoint (503) rather than the whole server refusing to start.
+	lkConfig := livekitConfig{
+		URL:       os.Getenv("LIVEKIT_URL"),
+		APIKey:    os.Getenv("LIVEKIT_API_KEY"),
+		APISecret: os.Getenv("LIVEKIT_API_SECRET"),
+	}
+	if !lkConfig.Configured() {
+		logger.Warn("LIVEKIT_URL/LIVEKIT_API_KEY/LIVEKIT_API_SECRET are not fully set — " +
+			"POST /rides/{code}/voice-token will return 503 until they are")
+	}
+
+	// Unlike ALLOWED_ORIGINS and ORS_API_KEY above, a blank URL here is not a
+	// "warn and degrade" situation — it must stop the process before it ever binds a
+	// port. auth.Verifier has no notion of "open"; if it boots at all, every request
+	// runs through the same verification path (docs/ADR/ADR-017.md Decision §7). There
+	// is deliberately no DEV_NO_AUTH escape hatch: a flag like that never gets turned
+	// back off before the build it's still set on reaches somewhere it shouldn't.
+	//
+	// SUPABASE_URL now carries the load SUPABASE_JWT_SECRET used to: every real
+	// Supabase token's `iss` is "<SUPABASE_URL>/auth/v1", and it's also where the
+	// project's JWKS lives (<SUPABASE_URL>/auth/v1/.well-known/jwks.json) now that
+	// verification is ES256-via-JWKS rather than a shared HS256 secret
+	// (docs/ADR/ADR-017.md §8 named this fork; SUPABASE_JWT_SECRET is retired).
+	supabaseURL := os.Getenv("SUPABASE_URL")
+	if supabaseURL == "" {
+		err := errors.New("SUPABASE_URL is not set")
+		logger.Error("refusing to start with the auth boundary unconfigured", "err", err)
+		return err
+	}
+	verifier := auth.New(supabaseURL, nil)
+	// A fetch failure here is not fatal, unlike the blank-URL check above: with no
+	// keys cached, every request 401s, which is already fail-closed, and the first
+	// unrecognised kid after Supabase recovers triggers a lazy, rate-limited refetch
+	// (internal/auth.Verifier.getKey) — no restart needed.
+	if err := verifier.Refresh(); err != nil {
+		logger.Error("could not fetch the Supabase JWKS at startup — every request will 401 until it succeeds", "err", err)
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -76,7 +135,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:    ":" + port,
-		Handler: buildHandler(logger, origins, hub.New(origins), orsClient),
+		Handler: buildHandler(logger, origins, hub.New(origins), orsClient, verifier, lkConfig),
 
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
@@ -181,16 +240,28 @@ func newLogger(raw string) (*slog.Logger, error) {
 // Extracted from run() so that main_test.go can exercise the exact chain the server
 // runs — a WebSocket upgrade only proves anything if it goes through every wrapper.
 //
-// Order is Recover → Log → CORS → mux:
+// Order is Recover → Log → CORS → Auth → mux:
 //   - Recover outermost, so a panic in any other middleware is caught too.
 //   - Log outside CORS, so preflights are visible; CORS answers those itself and the
-//     mux never sees them.
-//   - CORS wrapping the whole mux, so /ws and every route added later inherit the
-//     policy without anyone remembering to.
+//     mux never sees them. Log is also outside Auth for the matching reason: a 401 is
+//     exactly the kind of failure worth having in the access log, and an auth boundary
+//     whose rejections are invisible is not observable.
+//   - CORS wrapping everything inside it, so /ws and every route added later inherit
+//     the policy without anyone remembering to.
+//   - Auth inside CORS, not outside it, because a browser preflight (OPTIONS carrying
+//     Access-Control-Request-Method) carries no Authorization header at all — the
+//     browser strips it before sending one. Auth outside CORS would therefore 401
+//     every preflight; CORS answers preflights itself and terminates the chain there,
+//     so Auth never sees them (docs/ADR/ADR-017.md Decision §2).
+//   - Auth wrapping the whole mux, for the same "route added later" reason as CORS: an
+//     authorization boundary must cover routes nobody has written yet, and per-route
+//     auth fails open on the one route someone forgets to add it to
+//     (docs/ADR/ADR-017.md Decision §1). /healthz is the one exemption, handled inside
+//     auth.Verifier.Require itself rather than by routing around it here.
 //
-// A per-IP rate limiter, when it lands, goes inside CORS so that a preflight is never
-// rate-limited.
-func buildHandler(logger *slog.Logger, origins []string, h *hub.Hub, orsClient *ors.Client) http.Handler {
+// A per-IP rate limiter, when it lands, goes inside CORS (alongside Auth) so that a
+// preflight is never rate-limited.
+func buildHandler(logger *slog.Logger, origins []string, h *hub.Hub, orsClient *ors.Client, verifier *auth.Verifier, lk livekitConfig) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -215,17 +286,13 @@ func buildHandler(logger *slog.Logger, origins []string, h *hub.Hub, orsClient *
 	// Free-typed address search, proxied to ORS's Pelias geocoder. Not ride-scoped —
 	// see geocodeHandler's doc comment for why, and for why this is POST not GET.
 	mux.HandleFunc("POST /geocode", geocodeHandler(orsClient))
-	// Phase 3: mint a LiveKit JWT for this rider + room.
-	mux.HandleFunc("POST /rides/{code}/voice-token", notImplemented)
+	// Mint a LiveKit JWT for this rider + room (ADR-005, ADR-020).
+	mux.HandleFunc("POST /rides/{code}/voice-token", voiceTokenHandler(h, lk))
 
-	return httpx.Recover(logger)(httpx.Log(logger)(httpx.CORS(origins)(mux)))
+	return httpx.Recover(logger)(httpx.Log(logger)(httpx.CORS(origins)(verifier.Require(mux))))
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
-}
-
-func notImplemented(w http.ResponseWriter, _ *http.Request) {
-	http.Error(w, "not implemented yet", http.StatusNotImplemented)
 }
