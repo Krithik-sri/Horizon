@@ -45,7 +45,22 @@ Everything else goes straight to a branch. Most work does not need an ADR.
 | [008](./ADR-008.md) | **Two backends**: Go for ephemeral realtime, Supabase for durable state | Accepted | Supabase Realtime's throughput improves, or convoy state needs to be durable |
 | [009](./ADR-009.md) | **No standings, no ranking** — the race indicator is removed | Accepted | Never — this follows directly from the No Gamification pillar |
 | [010](./ADR-010.md) | **One hub lock and one broadcast sweep**, not one goroutine per room | Accepted | Concurrent live rides reach the hundreds — shard the lock per room |
-| [011](./ADR-011.md) | **Navigation is a first-class capability** — route line + turn-by-turn, amending 003 and 006 | Accepted | Off-route rerouting, spoken guidance, or destination search become their own decisions |
+| [011](./ADR-011.md) | **Navigation is a first-class capability** — route line + turn-by-turn, amending 003 and 006 | Accepted — amended by [012](./ADR-012.md), [013](./ADR-013.md) | Off-route rerouting, spoken guidance, or destination search become their own decisions |
+| [012](./ADR-012.md) | **Destination search ships**; maneuver cues are ambient, not eventful; the route line stays two-tone amber, amending 011 | Accepted — amended by [014](./ADR-014.md), [015](./ADR-015.md) | Off-route rerouting or spoken guidance become their own decisions; ambient-only maneuver cues prove insufficient in the field |
+| [013](./ADR-013.md) | **A route can be fetched without being stored or broadcast** (`preview`), and alternatives are pre-commit only — the room still stores one route, amending 011 | Accepted | ORS quota pressure becomes real; a third feature wants a non-broadcast route fetch |
+| [014](./ADR-014.md) | **Off-route rerouting is personal** — fetched by one rider, rendered on one device, never broadcast; the convoy's route is immutable to a wrong turn, amending 012 | Accepted | The personal route peels away from the group's road; false reroutes in cities prove common |
+| [015](./ADR-015.md) | **Spoken guidance ships**, timed by distance to the maneuver rather than by detecting the corner — the position of the turn is already in the data, amending 012 | Accepted | LiveKit convoy voice ships and the two audio sources must be coordinated; riders report late cues |
+| [016](./ADR-016.md) | **Anonymous sign-in is the default identity** — an account is an upgrade that preserves `sub`, never a gate on riding | Accepted | Riders lose data to reinstalls; the free tier's inactivity pause bites |
+| [017](./ADR-017.md) | **`/ws` requires a verified Supabase JWT**, the rider id is the token's `sub`, and `?rider=` is removed — implementing what 008 specified and three docs wrongly described as existing | Accepted | The Supabase project uses asymmetric keys (JWKS, a third Go dependency); mid-ride revocation becomes a real threat |
+| [018](./ADR-018.md) | **The rider's phone writes the durable ride record** — no Edge Function, and no shared convoy record; each rider's row is their own | Accepted | A consent model ships (shared records, a real `ride_participants` table); geospatial querying wants PostGIS |
+| [019](./ADR-019.md) | **Return shows facts about one ride, never comparisons** — if a number needs a second ride to compute, it's a ranking; extends 009 from between-riders to between-your-own-rides | Accepted | Only if PRODUCT.md's No Gamification pillar is itself revised |
+| [020](./ADR-020.md) | **Convoy voice is exempt from the corner rule** — the app never mutes, ducks or delays a co-rider; navigation speech yields by skipping, never delaying, amending 015's open audio-contention item | Accepted | The iOS port forces the lazy-connect question; battery measurement rules out continuous subscription |
+| [021](./ADR-021.md) | **Location runs in a task that may execute with no React tree**; one GPS subscription replaces `watchPositionAsync`, and a killed process loses fixes rather than buffering them | Accepted | Task delivery proves laggier than `watchPositionAsync`; background JS timer throttling breaks reconnection |
+
+**Note on 011's "Revisit when" cell:** it lists destination search as something that would "become
+its own decision" — [012](./ADR-012.md) is that decision. The cell above is left exactly as
+originally written, per the append-only rule; it is now only partly current, and this note is the
+correction, not an edit to 011's row.
 
 ## Retired task scheme
 
