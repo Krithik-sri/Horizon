@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Pressable, Text, TextInput, type TextStyle, View } from 'react-native';
+import { Pressable, ScrollView, Switch, Text, TextInput, type TextStyle, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 
-import { BASE_URL } from '@/core/config';
-import { searchPlaces, type Place, type SearchError } from '@/core/geocode';
-import { routeErrorText } from '@/core/route';
+import { api } from '@/core/api';
+import { loadVoiceEnabled, saveVoiceEnabled } from '@/core/prefs';
+import { ensureSession } from '@/core/supabase';
 import { color, radius, register, space, type } from '@/design/tokens';
 import { useRide } from '@/state/useRide';
 
@@ -35,22 +35,7 @@ const codeDisplayStyle: TextStyle = {
 
 type PermissionStatus = 'granted' | 'denied' | 'undetermined';
 type StartFlowState = 'idle' | 'posting' | 'confirm';
-type JoinFlowState = 'idle' | 'connecting';
-type SearchFlowState = 'idle' | 'searching' | 'setting-route';
-
-/** A failed searchPlaces call is otherwise invisible — same inline-error treatment
- * as startError/joinError below, just mapped from geocode.ts's error union. */
-function searchErrorText(error: SearchError): string {
-  switch (error) {
-    case 'unavailable':
-    case 'upstream-failed':
-      return 'Search unavailable.';
-    case 'network':
-      return "Couldn't reach the search service.";
-    case 'bad-query':
-      return "Couldn't search for that.";
-  }
-}
+type JoinFlowState = 'idle' | 'connecting' | 'connected';
 
 export default function DepartureScreen() {
   const router = useRouter();
@@ -58,6 +43,27 @@ export default function DepartureScreen() {
 
   const [name, setName] = useState('');
   const [permission, setPermission] = useState<PermissionStatus>('undetermined');
+
+  // ADR-016: _layout.tsx already ran ensureSession() once behind the splash screen —
+  // this re-checks it here so a first-ever-launch failure (no network, per ADR-016's
+  // "Negative" consequences) surfaces as a real message instead of a Start button that
+  // silently does nothing. ensureSession() is cheap to call again: a cached session
+  // resolves with no network call at all.
+  // Holds the *reason*, not a flag — see ensureSession's doc comment. A project with
+  // anonymous sign-ins still switched off and a phone with no signal fail identically
+  // from here, and only one of them is fixed by anything the rider can do.
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  useEffect(() => {
+    ensureSession().then((r) => setSessionError(r.ok ? null : r.reason));
+  }, []);
+  function retrySession() {
+    ensureSession().then((r) => setSessionError(r.ok ? null : r.reason));
+  }
+
+  // ADR-015 §5: on by default, and the toggle lives here — Departure — only, never
+  // in Motion. Default true matches loadVoiceEnabled's own default, so there's no
+  // flash-of-off before the AsyncStorage read resolves.
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
 
   const [startState, setStartState] = useState<StartFlowState>('idle');
   const [startCode, setStartCode] = useState<string | null>(null);
@@ -67,23 +73,25 @@ export default function DepartureScreen() {
   const [joinState, setJoinState] = useState<JoinFlowState>('idle');
   const [joinError, setJoinError] = useState<string | null>(null);
 
-  // The one-shot fix used both as the search bias (`near`) and as waypoint 1 of the
-  // route below. Departure otherwise never touches GPS — only Motion watches position
-  // — so this is deliberately a single getCurrentPositionAsync() call, not a
-  // subscription: a search field has no business keeping location watched.
-  const [originFix, setOriginFix] = useState<{ lat: number; lng: number } | null>(null);
-  const [query, setQuery] = useState('');
-  const [searchState, setSearchState] = useState<SearchFlowState>('idle');
-  const [places, setPlaces] = useState<Place[] | null>(null);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  // The chosen result's label, once picked — its presence swaps the search UI for a
-  // plain confirmation line (see the render below).
-  const [picked, setPicked] = useState<string | null>(null);
-
   async function requestPermission() {
     try {
       const { status: result } = await Location.requestForegroundPermissionsAsync();
       setPermission(result === 'granted' ? 'granted' : 'denied');
+      if (result !== 'granted') return; // Android requires foreground granted before background can even be asked
+
+      // ADR-021 §8: background location joins the foreground request here, once, in
+      // Departure — never mid-ride, which is exactly the interruption CLAUDE.md
+      // forbids. What the rider actually sees is the OS permission dialog itself,
+      // whose rationale text (app.config.ts's locationAlwaysAndWhenInUsePermission)
+      // already says what this does: "Keeps sharing your position during a ride when
+      // the screen is off." Denial isn't fatal — without it the background task still
+      // runs while the app is foregrounded, which is exactly today's behaviour, so
+      // this degrades quietly rather than blocking Start/Join. No separate state to
+      // track: nothing in this screen's UI depends on the background grant. Caught
+      // locally rather than left to the outer catch, which would otherwise flip
+      // `permission` back to 'denied' — the foreground grant two lines up must stand
+      // on its own.
+      await Location.requestBackgroundPermissionsAsync().catch(() => {});
     } catch {
       setPermission('denied');
     }
@@ -92,6 +100,15 @@ export default function DepartureScreen() {
   useEffect(() => {
     requestPermission();
   }, []);
+
+  useEffect(() => {
+    loadVoiceEnabled().then(setVoiceEnabled);
+  }, []);
+
+  function handleVoiceToggle(next: boolean) {
+    setVoiceEnabled(next);
+    saveVoiceEnabled(next);
+  }
 
   // Start flow: watch connection status once join() has been called for a
   // just-created ride code.
@@ -124,16 +141,22 @@ export default function DepartureScreen() {
   }, [startState, startCode]);
 
   // Join flow: watch connection status once join() has been called for a typed code.
+  // Transitions to 'connected' rather than navigating immediately — this is what makes
+  // the destination search reachable on the join path (previously this effect
+  // redirected to /ride/[code] the instant the socket opened, so a joiner never got a
+  // render with search on screen). The guard covers 'connecting' AND 'connected' so a
+  // later drop (e.g. the room GC's mid-search) is still caught, mirroring the start
+  // flow's rejection watch, which persists through its whole 'confirm' state.
   useEffect(() => {
-    if (joinState !== 'connecting') return;
+    if (joinState === 'idle') return;
     if (status === 'open') {
-      router.replace(`/ride/${joinCode}`);
+      setJoinState('connected');
     } else if (status === 'rejected') {
       setJoinError("That code wasn't found — check it and try again.");
       useRide.getState().leave();
       setJoinState('idle');
     }
-  }, [status, joinState, joinCode, router]);
+  }, [status, joinState]);
 
   // Join flow: same timeout guard as the start flow above — an unreachable backend
   // would otherwise leave the Join button stuck on "Connecting…" forever.
@@ -148,75 +171,12 @@ export default function DepartureScreen() {
     return () => clearTimeout(timer);
   }, [joinState]);
 
-  // Fetch a one-shot fix the moment the confirm state is entered — a ride code exists
-  // and the socket is open by then, which is what setDestination requires. Deps are
-  // just [startState] so this fires once per confirm attempt, not on every keystroke
-  // in the search field below.
-  useEffect(() => {
-    if (startState !== 'confirm') return;
-    (async () => {
-      try {
-        const pos = await Location.getCurrentPositionAsync();
-        setOriginFix({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-      } catch {
-        // A permissions edge case must never crash the screen — handleSearch below
-        // surfaces the missing fix instead.
-      }
-    })();
-  }, [startState]);
-
-  async function handleSearch() {
-    setSearchError(null);
-    setPlaces(null);
-    const text = query.trim();
-    if (!text) return; // nothing typed — silent no-op, not an error
-    if (!originFix) {
-      setSearchError('Need your location to plan a route.');
-      return;
-    }
-    setSearchState('searching');
-    const result = await searchPlaces(text, originFix);
-    setSearchState('idle');
-    if (!result.ok) {
-      setSearchError(searchErrorText(result.error));
-      return;
-    }
-    setPlaces(result.places);
-  }
-
-  // Sets the ride's one route via the store (which POSTs and records routeError —
-  // not duplicated here); the route then reaches every rider over the WebSocket.
-  // `picked` is set only after that await resolves WITHOUT a routeError — setting it
-  // optimistically would show the rider a confirmed destination for a route that
-  // never actually happened (no-route, quota, unreachable server), the same silent
-  // failure DestinationMarker exists to avoid on the map side.
-  async function handlePick(place: Place) {
-    if (!originFix) return; // unreachable: handleSearch already required a fix
-    setPlaces(null);
-    setSearchError(null);
-    setSearchState('setting-route');
-    await useRide.getState().setDestination([
-      [originFix.lat, originFix.lng],
-      [place.lat, place.lng],
-    ]);
-    setSearchState('idle');
-    const { routeError } = useRide.getState();
-    if (routeError) {
-      // unknown-ride is genuinely reachable here (unlike the long-press path in
-      // ride/[code].tsx) — the room can GC between minting the code and picking a
-      // destination — so routeErrorText's null case still needs a visible fallback.
-      setSearchError(routeErrorText(routeError) ?? "Couldn't set that destination.");
-      return; // picked stays unset — search UI stays up so the rider can retry
-    }
-    setPicked(place.label);
-  }
-
   async function handleStart() {
     setStartError(null);
     setStartState('posting');
     let res: Response;
     try {
-      res = await fetch(`${BASE_URL}/rides`, { method: 'POST' });
+      res = await api('/rides', { method: 'POST' });
     } catch {
       setStartError('Could not start a ride. Check your connection.');
       setStartState('idle');
@@ -245,15 +205,43 @@ export default function DepartureScreen() {
     useRide.getState().join(joinCode, name.trim());
   }
 
+  function handleJoinRide() {
+    if (status === 'open') {
+      router.replace(`/ride/${joinCode}`);
+    }
+  }
+
   const nameValid = name.trim().length > 0;
-  const startEnabled = nameValid && startState === 'idle';
-  const joinEnabled = nameValid && joinCode.length === 6 && joinState === 'idle';
+  const startEnabled = nameValid && startState === 'idle' && !sessionError;
+  const joinEnabled = nameValid && joinCode.length === 6 && joinState === 'idle' && !sessionError;
   const startRidingEnabled = status === 'open';
+  const joinRideEnabled = status === 'open';
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: color.surface.base }} edges={['top', 'bottom', 'left', 'right']}>
-      <View style={{ flex: 1, padding: register.departure.padding }}>
+      {/* ScrollView, not a plain View: the screen already runs long once the confirm
+          step's extra rows (code, Plan the route, Start/Join Riding) are in view, so
+          the keyboard can cover the button beneath it. keyboardShouldPersistTaps
+          ="handled" so a tap still registers instead of just dismissing the keyboard
+          first. */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ padding: register.departure.padding }}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={[type.departure.display, { color: color.ink.primary }]}>Horizon</Text>
+
+        {sessionError !== null && (
+          <View style={{ marginTop: space[4] }}>
+            <Text style={[type.departure.body, { color: color.ink.primary }]}>{sessionError}</Text>
+            <Pressable
+              onPress={retrySession}
+              style={{ minHeight: register.departure.touchTarget, justifyContent: 'center' }}
+            >
+              <Text style={[type.departure.body, { color: color.amber.core }]}>Retry</Text>
+            </Pressable>
+          </View>
+        )}
 
         {permission === 'granted' && (
           <Text style={[type.departure.body, { color: color.signal.good, marginTop: space[4] }]}>
@@ -296,6 +284,26 @@ export default function DepartureScreen() {
           ]}
         />
 
+        {/* ADR-015 §5: the only place in the app a rider can reach this control —
+            Motion never shows it, so reaching for it mid-ride is never an option. */}
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginTop: space[6],
+            minHeight: register.departure.touchTarget,
+          }}
+        >
+          <Text style={[type.departure.body, { color: color.ink.primary }]}>Spoken directions</Text>
+          <Switch
+            value={voiceEnabled}
+            onValueChange={handleVoiceToggle}
+            trackColor={{ false: color.ink.disabled, true: color.amber.core }}
+            thumbColor={color.ink.primary}
+          />
+        </View>
+
         <Text style={[type.departure.title, { color: color.ink.primary, marginTop: space[7] }]}>
           Start a ride
         </Text>
@@ -327,64 +335,19 @@ export default function DepartureScreen() {
           <View style={{ marginTop: space[4] }}>
             <Text style={codeDisplayStyle}>{startCode}</Text>
 
-            <Text style={[type.departure.title, { color: color.ink.primary, marginTop: space[7] }]}>
-              Where to?
-            </Text>
-            {picked ? (
-              <Text style={[type.departure.body, { color: color.ink.primary, marginTop: space[2] }]}>
-                {picked}
-              </Text>
-            ) : (
-              <>
-                <TextInput
-                  value={query}
-                  onChangeText={setQuery}
-                  placeholder="Search for a destination"
-                  placeholderTextColor={color.ink.tertiary}
-                  returnKeyType="search"
-                  onSubmitEditing={handleSearch}
-                  style={[
-                    type.departure.body,
-                    {
-                      color: color.ink.primary,
-                      minHeight: register.departure.touchTarget,
-                      borderBottomWidth: 1,
-                      borderColor: color.surface.hairline,
-                      marginTop: space[2],
-                    },
-                  ]}
-                />
-                {searchState === 'searching' && (
-                  <Text style={[type.departure.body, { color: color.ink.secondary, marginTop: space[2] }]}>
-                    Searching…
-                  </Text>
-                )}
-                {searchState === 'setting-route' && (
-                  <Text style={[type.departure.body, { color: color.ink.secondary, marginTop: space[2] }]}>
-                    Setting route…
-                  </Text>
-                )}
-                {places?.length === 0 && (
-                  <Text style={[type.departure.body, { color: color.ink.secondary, marginTop: space[2] }]}>
-                    No results.
-                  </Text>
-                )}
-                {places?.map((place, i) => (
-                  <Pressable
-                    key={`${place.lat},${place.lng},${i}`}
-                    onPress={() => handlePick(place)}
-                    style={{ minHeight: register.departure.touchTarget, justifyContent: 'center' }}
-                  >
-                    <Text style={[type.departure.body, { color: color.ink.primary }]}>{place.label}</Text>
-                  </Pressable>
-                ))}
-                {searchError && (
-                  <Text style={[type.departure.body, { color: color.ink.primary, marginTop: space[2] }]}>
-                    {searchError}
-                  </Text>
-                )}
-              </>
-            )}
+            <Pressable
+              onPress={() => router.push(`/plan/${startCode}`)}
+              style={{
+                marginTop: space[4],
+                minHeight: register.departure.touchTarget,
+                borderRadius: radius.card,
+                backgroundColor: color.amber.core,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Text style={[type.departure.body, { color: color.surface.void }]}>Plan the route</Text>
+            </Pressable>
 
             <Pressable
               disabled={!startRidingEnabled}
@@ -418,39 +381,96 @@ export default function DepartureScreen() {
         <Text style={[type.departure.title, { color: color.ink.primary, marginTop: space[7] }]}>
           Join a ride
         </Text>
-        <TextInput
-          value={joinCode}
-          onChangeText={(text) => setJoinCode(filterCode(text))}
-          placeholder="CODE"
-          placeholderTextColor={color.ink.tertiary}
-          autoCapitalize="characters"
-          autoCorrect={false}
-          maxLength={6}
-          editable={joinState === 'idle'}
-          style={[codeDisplayStyle, { color: color.ink.primary, marginTop: space[4] }]}
-        />
-        <Pressable
-          disabled={!joinEnabled}
-          onPress={handleJoin}
-          style={{
-            marginTop: space[4],
-            minHeight: register.departure.touchTarget,
-            borderRadius: radius.card,
-            backgroundColor: joinEnabled ? color.amber.core : color.ink.disabled,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Text style={[type.departure.body, { color: joinEnabled ? color.surface.void : color.ink.secondary }]}>
-            {joinState === 'connecting' ? 'Connecting…' : 'Join'}
-          </Text>
-        </Pressable>
+        {joinState !== 'connected' ? (
+          <>
+            <TextInput
+              value={joinCode}
+              onChangeText={(text) => setJoinCode(filterCode(text))}
+              placeholder="CODE"
+              placeholderTextColor={color.ink.tertiary}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              maxLength={6}
+              editable={joinState === 'idle'}
+              style={[codeDisplayStyle, { color: color.ink.primary, marginTop: space[4] }]}
+            />
+            <Pressable
+              disabled={!joinEnabled}
+              onPress={handleJoin}
+              style={{
+                marginTop: space[4],
+                minHeight: register.departure.touchTarget,
+                borderRadius: radius.card,
+                backgroundColor: joinEnabled ? color.amber.core : color.ink.disabled,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Text style={[type.departure.body, { color: joinEnabled ? color.surface.void : color.ink.secondary }]}>
+                {joinState === 'connecting' ? 'Connecting…' : 'Join'}
+              </Text>
+            </Pressable>
+          </>
+        ) : (
+          // Connected but not yet navigated — same shape as the start flow's confirm
+          // step, and for the same reason: this is what makes the destination search
+          // reachable on the join path instead of the old immediate router.replace.
+          <View style={{ marginTop: space[4] }}>
+            <Text style={codeDisplayStyle}>{joinCode}</Text>
+
+            <Pressable
+              onPress={() => router.push(`/plan/${joinCode}`)}
+              style={{
+                marginTop: space[4],
+                minHeight: register.departure.touchTarget,
+                borderRadius: radius.card,
+                backgroundColor: color.amber.core,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Text style={[type.departure.body, { color: color.surface.void }]}>Plan the route</Text>
+            </Pressable>
+
+            <Pressable
+              disabled={!joinRideEnabled}
+              onPress={handleJoinRide}
+              style={{
+                marginTop: space[4],
+                minHeight: register.departure.touchTarget,
+                borderRadius: radius.card,
+                backgroundColor: joinRideEnabled ? color.amber.core : color.ink.disabled,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Text
+                style={[
+                  type.departure.body,
+                  { color: joinRideEnabled ? color.surface.void : color.ink.secondary },
+                ]}
+              >
+                Join Ride
+              </Text>
+            </Pressable>
+          </View>
+        )}
         {joinError && (
           <Text style={[type.departure.body, { color: color.ink.primary, marginTop: space[2] }]}>
             {joinError}
           </Text>
         )}
-      </View>
+
+        {/* A text link, not a tab bar — nav chrome would compete with Departure's one
+            question, "am I ready to ride?" (docs/PRODUCT.md). Placed last, below both
+            flows, so it's the quietest thing on the screen. */}
+        <Pressable
+          onPress={() => router.push('/return')}
+          style={{ marginTop: space[7], minHeight: register.departure.touchTarget, justifyContent: 'center' }}
+        >
+          <Text style={[type.departure.label, { color: color.ink.secondary }]}>Past rides</Text>
+        </Pressable>
+      </ScrollView>
     </SafeAreaView>
   );
 }
