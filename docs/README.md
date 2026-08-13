@@ -15,6 +15,7 @@ probably belongs in an ADR.
 | [`ADR/`](./ADR/) | Why isn't it something else? | A decision is made — one record per decision, never edited in place. |
 | [`SETUP.md`](./SETUP.md) | How do I run the Expo app? | App setup steps change. |
 | [`SETUP_BACKEND.md`](./SETUP_BACKEND.md) | How do I run the Go server? | Backend setup steps change. |
+| [`FINISHING.md`](./FINISHING.md) | How do I take the code-complete app to two phones on a real road? | A feature milestone's exit condition or verification steps change. |
 
 ## Referring to these files
 

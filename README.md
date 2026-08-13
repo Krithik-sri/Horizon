@@ -39,7 +39,7 @@ horizon/
 │   ├── SETUP.md                  # Expo app setup
 │   ├── SETUP_BACKEND.md         # Go server setup
 │   └── ADR/                     # architecture decision records
-├── backend/                 # Go realtime server (WS hub + ORS route proxy; voice stubbed 501)
+├── backend/                 # Go realtime server (WS hub, ORS route + geocode proxy, LiveKit tokens, JWT auth)
 └── mobile/                  # React Native (Expo) app — Android first, iOS later
 ```
 
@@ -89,23 +89,36 @@ Cloned the repo — here's the shortest path from that to three phones on an act
 lives in [`docs/SETUP.md`](./docs/SETUP.md) and [`docs/SETUP_BACKEND.md`](./docs/SETUP_BACKEND.md);
 this is the order the pieces go in.
 
-1. **Get an OpenRouteService key.** Free, email signup, no card — the only credential this MVP
-   needs.
-2. **Run or deploy the backend.** Locally (`go run .`) for a tabletop test, or push to GitHub and
-   deploy to Koyeb for a real ride — both covered in `docs/SETUP_BACKEND.md`.
-3. **Point the app at it.** Edit `BASE_URL` in [`mobile/src/core/config.ts`](./mobile/src/core/config.ts)
-   — your LAN IP for a tabletop test, the Koyeb URL for a real one. Everything else (the WebSocket
-   URL, every HTTP call) derives from it.
-4. **Build once, install per rider.** MapLibre and LiveKit need native code, so Expo Go can't run
-   this app — see `docs/SETUP.md`. Do this *after* step 3: `eas build --profile preview --platform
-   android` bakes `config.ts`'s URL into the build at bundle time (`preview`, not `development` —
-   that profile expects a live Metro server, which nobody has on a road). Changing the URL later
-   means every rider needs a new install link.
-5. **Ride.** One rider creates a ride and reads the 6-character code aloud; everyone else joins
-   with it. Long-press the map to set a destination — it routes the whole convoy.
+1. **Get an OpenRouteService key.** Free, email signup, no card — routing and place search both run
+   through it.
+2. **Create a Supabase project.** Free, email signup, no card. Two settings are not optional and
+   both are easier to get right now than to diagnose later: use the **legacy HS256 JWT secret**
+   rather than the asymmetric signing keys new projects now default to (`docs/ADR/ADR-017.md` §8 —
+   with ES256, every token silently fails verification), and **enable anonymous sign-ins** under
+   Auth → Sign In / Providers, which are off by default (`docs/ADR/ADR-016.md`). Then apply
+   `supabase/migrations/`. Riders never see a sign-up screen; this is invisible to them.
+3. **Run the backend and put a tunnel in front of it.** `go run .`, then
+   `cloudflared tunnel --url http://localhost:8080` — no ports opened, no platform account, TLS and
+   `wss://` for free (`docs/SETUP_BACKEND.md`). Use a **named** tunnel if you want a URL that
+   survives a restart; step 5 explains why that matters more than it sounds. The server **will
+   refuse to start without `SUPABASE_JWT_SECRET`**, on purpose: an unset auth secret must never
+   quietly mean "everything is open" (`docs/ADR/ADR-017.md` §7).
+4. **Point the app at it.** Edit `BASE_URL` in [`mobile/src/core/config.ts`](./mobile/src/core/config.ts)
+   — your LAN IP for a tabletop test, the tunnel's `https://` URL for a real one. Everything else
+   (the WebSocket URL, every HTTP call) derives from it. Set the two `EXPO_PUBLIC_SUPABASE_*` values in
+   `mobile/.env` too; the anon key is deliberately public — RLS is the security boundary, not key
+   secrecy.
+5. **Build once, install per rider.** MapLibre, LiveKit and `expo-speech` all need native code, so
+   Expo Go can't run this app — see `docs/SETUP.md`. Do this *after* step 4: `eas build --profile
+   preview --platform android` bakes `config.ts`'s URL into the build at bundle time (`preview`, not
+   `development` — that profile expects a live Metro server, which nobody has on a road). Changing
+   the URL later means every rider needs a new install link.
+6. **Ride.** One rider creates a ride and reads the 6-character code aloud; everyone else joins with
+   it. Plan a route from Departure, or long-press the map mid-ride — either way it routes the whole
+   convoy. Hold the bottom edge of the screen to talk.
 
-Neither Supabase nor LiveKit is needed for this — auth is deferred (`docs/ADR/ADR-008.md`) and
-voice is still Phase 3, same as in the Quickstart above.
+LiveKit is optional: without `LIVEKIT_*` set, the voice endpoint answers 503 and the app renders no
+push-to-talk control at all rather than a button that does nothing (`docs/ADR/ADR-020.md` §6).
 
 ---
 
@@ -116,5 +129,14 @@ voice is still Phase 3, same as in the Quickstart above.
 | 0 | App shell + design tokens; own dot shows on the map. | written, never run on a device |
 | 1 | Two phones see each other live. **(the whole product in miniature)** | backend verified; app written, never run |
 | 2 | Route line + turn cues. | backend verified; app written, never run |
-| 3 | Push-to-talk voice. | backend stubbed (`501`); app not started |
-| 4 | Background location, reconnect hardening, battery. | — |
+| 3 | Push-to-talk voice. | backend verified; app written, never run |
+| 4 | Background location, reconnect hardening, battery. | written, never run on a device |
+
+Beyond the original five phases, also code-complete and equally unproven: the multi-stop ride
+planner, alternative routes, ETA, personal off-route rerouting, spoken guidance, Supabase anonymous
+auth with JWT verification on every backend route, and the Return register (ride history, journal,
+photos). Decisions are recorded in [`docs/ADR/`](./docs/ADR/) 013–021.
+
+**Every row above says "never run on a device."** That is the honest state of this project: a lot of
+code that type-checks, passes its self-checks, and has never met a motorcycle. The next task is not
+another feature.

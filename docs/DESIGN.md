@@ -3,11 +3,9 @@
 Concrete values. [`PRODUCT.md`](./PRODUCT.md) says *why*; this file says *what*, in numbers you can
 transcribe without inventing anything.
 
-**This document is the spec. `mobile/src/design/tokens.ts` will be the implementation, and once it
-exists it becomes authoritative** — this file then documents intent and rationale, not truth. The
-rules for applying all of it live in the `horizon-design` skill.
-
-> Nothing here is built yet. `mobile/src/` is empty; `tokens.ts` is task #1 of the design work.
+**This document is the spec. `mobile/src/design/tokens.ts` is the implementation, and it is
+authoritative** — this file documents intent and rationale, not truth. The rules for applying all
+of it live in the `horizon-design` skill.
 
 ---
 
@@ -187,7 +185,8 @@ Per register:
 - **Motion** — *Ahead* is minimal (a single upcoming cue), *Now* carries the essential readout,
   *Held* is **collapsed entirely.** Deferred content does not exist on screen while riding.
 - **Return** — the line softens. *Held* becomes the primary zone; this is when everything that
-  waited arrives.
+  waited arrives. What fills it is bounded: facts about **this** ride, never a comparison — a
+  number that needs a second ride to compute doesn't ship ([`ADR-019`](./ADR/ADR-019.md)).
 
 ---
 

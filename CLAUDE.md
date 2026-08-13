@@ -80,8 +80,12 @@ invents a session. Full rationale: `docs/ADR/ADR-008.md`.
 
 - The app sends `Authorization: Bearer <supabase-jwt>` on the WS upgrade. Native RN `WebSocket`
   accepts a `headers` option — this is a real benefit of having no browser client.
-- **Never put a token in a query string.** `internal/httpx/logging.go` logs request URLs; a token
-  in the URL lands in the logs.
+- **Never put a token in a query string.** Note the long-repeated justification for this rule was
+  wrong on the facts: `internal/httpx/logging.go` logs `r.URL.Path` only, never `RawQuery`, so a
+  token in the URL would *not* have landed in this server's own log. The rule stands anyway, for
+  the reason that actually holds — a URL is exposed to proxies, CDN logs, and any future
+  middleware that logs the full URL, in a way a header is not. Corrected here after
+  `docs/ADR/ADR-012.md` flagged the same stale claim twice without fixing it.
 - Use `github.com/golang-jwt/jwt/v5` — do not hand-roll JWT verification. Alg-confusion and
   non-constant-time compares are exactly where "stdlib first" stops applying.
 
@@ -95,20 +99,27 @@ docs/      all project documentation (index: docs/README.md)
 
 ## Status
 
-Early, and **unproven on a real device**. `mobile/src/` has two working Expo Router screens
-(Departure at `src/app/index.tsx`, Motion at `src/app/ride/[code].tsx`), a design-token system, a
-WebSocket client with jittered backoff, and zustand ride state — it type-checks clean and a debug
-APK has been built, but Phases 0–2 below are code-complete, not field-tested. The backend has a
-hardened hub (reconnect-safe, reserved join codes, empty-room GC — `docs/ADR/ADR-010.md`) and a
-working ORS route proxy that pushes a `route` message to the room (`docs/ADR/ADR-011.md`). Voice
-remains stubbed `501`.
+**Phases 0–4 are code-complete. None of it has been run on a real device.** That gap is the whole
+story of this section — read it as "written and type-checked," never as "working."
 
-Build order:
-0. App shell + design tokens; own dot on the map (Motion register).
-1. Two phones see each other (the core pipe).
-2. Route line. 3. Voice. 4. Background location + reconnect hardening.
+What exists: four Expo Router screens (Departure `src/app/index.tsx`, Motion `src/app/ride/[code].tsx`,
+planner `src/app/plan/[code].tsx`, Return `src/app/return/`), full navigation (route line, ambient
+maneuver cue, ETA, alternatives, personal off-route rerouting, spoken guidance), a multi-stop ride
+planner, the Return register with Supabase-backed history, LiveKit push-to-talk, and background
+location behind an Android foreground service. The Go server verifies Supabase JWTs on every route,
+proxies ORS for routing and geocoding, mints LiveKit tokens, and runs the hardened hub
+(`docs/ADR/ADR-010.md`). Nothing is stubbed any more.
 
-Prefer completing the current phase over adding later-phase features.
+**Before any of it runs** you need a Supabase project with the legacy **HS256** JWT secret (not the
+now-default asymmetric keys) and anonymous sign-ins enabled, plus `SUPABASE_JWT_SECRET` in
+`backend/.env` — the server refuses to boot without it, deliberately (`docs/ADR/ADR-017.md` §7).
+Voice and background location both need a dev-client rebuild.
+
+Decisions live in `docs/ADR/` — 013 through 021 cover everything above, and each records what would
+justify revisiting it. **Read the relevant one before changing behaviour it governs**; several were
+written specifically to stop a decision being quietly re-litigated.
+
+The next work is not a feature. It is a real device, two phones, and a road.
 
 ## Tech stack (don't substitute without asking)
 
@@ -151,9 +162,11 @@ Server → all clients in room, on a fixed ~4 Hz tick (fan-out is decoupled from
 between frames — that is not a ranking, and the UI must never present it as one.
 
 `ageSec` = seconds since that rider's last fix (server clock); clients grey a rider out past ~10 s.
-Clients pass a stable per-session `rider` id on connect (`GET /ws?ride=…&name=…&rider=…`) so a
-reconnect replaces the old connection instead of adding a ghost rider; if absent the server mints
-one (the `welcome` id either way).
+A rider's id is the **`sub` claim of their verified Supabase JWT** — the server derives it, the
+client never sends one (`GET /ws?ride=…&name=…` plus the `Authorization` header). A reconnect
+therefore replaces that rider's old connection instead of adding a ghost, and the id cannot be
+spoofed the way the old client-asserted `?rider=` could. `welcome` still echoes it back so a
+client can pick its own dot out of `state` (`docs/ADR/ADR-017.md`).
 
 Server → one client, once on join if the room has a stored route, and → all clients whenever a
 route is set or replaced:
@@ -168,13 +181,22 @@ route is set or replaced:
 that isn't named `lat`/`lng`. `wayPoints` are indices into `polyline`. `steps` and `summary` may
 be `null`. Rationale, and why this isn't a field on `state`: `docs/ADR/ADR-011.md`.
 
-HTTP: `POST /rides` (→ join code) · `POST /rides/{code}/route` (ORS proxy → polyline) ·
+HTTP: `POST /rides` (→ join code) · `POST /rides/{code}/route` (ORS proxy → `{routes, selected}`) ·
 `POST /geocode` (ORS Pelias proxy → places) · `POST /rides/{code}/voice-token`
 (→ LiveKit JWT + url) · `GET /ws` · `GET /healthz`.
 
+`POST /rides/{code}/route` takes `{waypoints, preview, alternatives, index}` and always answers
+with an **array** of routes plus the selected index — length 1 unless alternatives were both
+requested and returned. `preview: true` returns the routes to that caller only: nothing is stored
+on the room and no `route` frame is broadcast, which is what lets the planner draw a line the
+rider hasn't committed to. Alternatives are pre-commit only — the room still stores exactly one
+route, so `hub.SetRoute` and the `route` frame above are unchanged (`docs/ADR/ADR-013.md`).
+
 `POST /geocode` is deliberately **not** ride-scoped (a place search has nothing to do with a
-room) and deliberately **POST, not `GET ?q=`** — `internal/httpx/logging.go` logs request URLs,
-and a searched destination is location data. Body `{"text": "…", "near": [lat, lng]}` (`near`
+room) and deliberately **POST, not `GET ?q=`** — a searched destination is location data, and a
+URL is exposed to proxies, CDN logs and browser history in a way a POST body is not. (Not because
+of this server's own log: `internal/httpx/logging.go` logs `r.URL.Path` only — see the token rule
+above.) Body `{"text": "…", "near": [lat, lng]}` (`near`
 optional, biases results); response `{"results": [{"label", "lat", "lng"}]}`. Zero matches is a
 200 with an empty array, not an error.
 

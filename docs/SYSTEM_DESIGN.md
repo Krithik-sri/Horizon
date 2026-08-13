@@ -5,8 +5,8 @@
 > between departure and arrival. Product intent is [`docs/PRODUCT.md`](./PRODUCT.md); this
 > document is only the "how."
 
-**Status:** design / early build · **Target:** Android first, iOS later · **Voice:** live
-push-to-talk · **No paid accounts / no credit card required to build or run this.**
+**Status:** Phases 0–4 code-complete, unproven on a device · **Target:** Android first, iOS later ·
+**Voice:** live push-to-talk · **No paid accounts / no credit card required to build or run this.**
 
 ---
 
@@ -31,8 +31,10 @@ maneuver cues — is another, alongside it, not a separate product
 - Gamification of any kind: badges, streaks, XP, levels, leaderboards.
 - A social graph beyond what Supabase Auth needs to own durable, per-rider data.
 - A web client ([`ADR-007`](./ADR/ADR-007.md)).
-- Off-route rerouting, spoken guidance, and destination search — not yet decided
-  ([`ADR-011`](./ADR/ADR-011.md)).
+- Off-route rerouting, spoken guidance, and destination search were all non-goals at
+  [`ADR-011`](./ADR/ADR-011.md)/[`ADR-012`](./ADR/ADR-012.md) — all three have since shipped
+  ([`ADR-012`](./ADR/ADR-012.md) destination search, [`ADR-014`](./ADR/ADR-014.md) off-route
+  rerouting, [`ADR-015`](./ADR/ADR-015.md) spoken guidance) and none is a non-goal any longer.
 
 ---
 
@@ -91,7 +93,10 @@ Where does new code go? Answer with this table before writing anything ([`ADR-00
 **Identity flows one way.** Supabase Auth is the *only* issuer. The Go server **verifies**
 Supabase JWTs (HS256, `SUPABASE_JWT_SECRET`, via `github.com/golang-jwt/jwt/v5`) — it never
 mints identity, never has a user table. The app sends `Authorization: Bearer <supabase-jwt>` on
-the WS upgrade (never in the query string — request logging captures URLs).
+the WS upgrade and on every HTTP route — never in the query string. Note the reason usually given
+for that rule is wrong: `internal/httpx/logging.go` logs `r.URL.Path` only, never `RawQuery`, so
+this server's own log would not have captured a token either way. The rule holds for the reason
+that does apply — a URL reaches proxies and CDN logs in a way a header does not.
 
 ---
 
@@ -152,10 +157,12 @@ All WebSocket messages are JSON with a `type` discriminator.
 There is no position number and no distance-along-route field. Riders are sorted by `id` only
 so the list doesn't jitter between frames — **this is not a ranking**
 ([`ADR-009`](./ADR/ADR-009.md)). `ageSec` = seconds since the last fix (server clock); grey a
-rider out past ~10s. Clients pass a stable `rider` id on `GET /ws?ride=…&name=…&rider=…` plus
-`Authorization: Bearer <supabase-jwt>`, so a reconnect replaces the old connection.
+rider out past ~10s. A rider's id is the `sub` claim of their verified Supabase JWT, presented as
+`Authorization: Bearer <supabase-jwt>` on `GET /ws?ride=…&name=…` — the client sends no id of its
+own, so a reconnect replaces that rider's old connection and the id cannot be spoofed
+([`ADR-017`](./ADR/ADR-017.md)).
 
-HTTP: `POST /rides` (→ join code) · `POST /rides/{code}/route` (ORS proxy → polyline) ·
+HTTP: `POST /rides` (→ join code) · `POST /rides/{code}/route` (ORS proxy → `{routes, selected}`) ·
 `POST /geocode` (ORS Pelias proxy → places) · `POST /rides/{code}/voice-token`
 (→ LiveKit JWT + url) · `GET /ws` · `GET /healthz`.
 
@@ -202,6 +209,10 @@ HTTP: `POST /rides` (→ join code) · `POST /rides/{code}/route` (ORS proxy →
 ---
 
 ## 11. Roadmap (build the spine first)
+
+**All five phases below are code-complete. None of it has been run on a real device** — that gap
+is the whole story of this section; read the table as "written and type-checked," not "working."
+How to close that gap, one verifiable feature milestone at a time: [`docs/FINISHING.md`](./FINISHING.md).
 
 | Phase | Deliverable | Proves |
 |-------|-------------|--------|

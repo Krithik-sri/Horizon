@@ -11,10 +11,12 @@
 > **Scope of this guide:** `GET /healthz`, `POST /rides` (reserve a join code), `GET /ws` (the
 > location in/out pipe), and `POST /rides/{code}/route` (the ORS proxy — fetches a route and
 > broadcasts a `route` message to everyone in the room, `docs/ADR/ADR-011.md`). The voice-token
-> endpoint is still a `501 Not Implemented` stub you fill in Phase 3.
+> endpoint (`POST /rides/{code}/voice-token`) is implemented too — it mints a LiveKit join token
+> (`docs/ADR/ADR-020.md`, `docs/ADR/ADR-022.md`), not a stub.
 >
-> No paid accounts, no credit card. The only secrets (LiveKit, ORS) come later and live **only**
-> here on the backend, never in the app.
+> No paid accounts, no credit card. The secrets (LiveKit, ORS, and the Supabase JWT secret this
+> server now refuses to boot without — `docs/ADR/ADR-017.md`) live **only** here on the backend,
+> never in the app.
 
 ---
 
@@ -71,9 +73,12 @@ Set-Location backend
 go mod download
 ```
 
-> One dependency, deliberately: `github.com/gorilla/websocket`. Everything else is standard
-> library ([`ADR-001`](./ADR/ADR-001.md)). The module path is just an import prefix — it doesn't
-> need to resolve over the internet.
+> Two direct dependencies, deliberately, and zero indirect: `github.com/gorilla/websocket` and
+> `github.com/golang-jwt/jwt/v5` — the second one added by [`ADR-017`](./ADR/ADR-017.md) to verify
+> Supabase JWTs, and per [`ADR-022`](./ADR/ADR-022.md) also what signs LiveKit voice tokens, so no
+> third dependency was needed for that. Everything else is standard library
+> ([`ADR-001`](./ADR/ADR-001.md)). The module path is just an import prefix — it doesn't need to
+> resolve over the internet.
 
 ✅ **Checkpoint:** `backend\go.mod` lists `github.com/gorilla/websocket` under `require`, and
 `go build ./...` succeeds.
@@ -153,10 +158,12 @@ Building that `riders` slice on every tick makes three deliberate choices:
 ## 4. The hub — `backend/internal/hub/hub.go`
 
 Owns the room map and upgrades incoming `/ws` requests. Each new client is greeted with a
-one-time `welcome` message carrying its id (so it can pick its own dot out of `state`), and
-may present a stable `?rider=` id so a reconnect replaces its old connection. A missing
-`?ride=` is still **400**; an unminted, expired, or otherwise unknown code is now rejected with
-**404 `unknown ride code`** before the upgrade (`docs/ADR/ADR-010.md`).
+one-time `welcome` message carrying its id (so it can pick its own dot out of `state`). That id
+is the `sub` claim of the client's verified Supabase JWT, so a reconnect replaces its old
+connection and the id cannot be spoofed — the client no longer sends one
+(`docs/ADR/ADR-017.md`). A missing `?ride=` is still **400**; an unminted, expired, or otherwise
+unknown code is rejected with **404 `unknown ride code`** before the upgrade
+(`docs/ADR/ADR-010.md`); a missing or invalid token is **401**, before that.
 
 The implementation is `backend/internal/hub/hub.go` — read it there. What follows is why it looks
 the way it does.
@@ -201,7 +208,7 @@ implementation is `backend/main.go` — read it there. What follows is why it lo
 `srv.Handler` is the wrapped chain, **not** the bare `mux`. `buildHandler` assembles it:
 
 ```
-Recover → Log → CORS → mux
+Recover → Log → CORS → Auth → mux
 ```
 
 One concern per file, all in `backend/internal/httpx/` (read them — they are short and the
@@ -214,6 +221,10 @@ reasoning is in the comments, and this guide deliberately does not copy source t
 | `recover.go` | Turns a panic into a 500 instead of a dead process |
 | `responsewriter.go` | The shared wrapper the other two need |
 
+Auth (`internal/auth.Verifier.Require`) isn't in `httpx` — verifying a Supabase JWT is a different
+concern from cross-origin policy or an access log line, so it lives in its own leaf package
+([`ADR-017`](./ADR/ADR-017.md)).
+
 Why that order:
 
 - **Recover outermost**, so a panic in *any* other middleware is caught too, not just one in a
@@ -222,8 +233,14 @@ Why that order:
   never sees them, so logging inside CORS would make a failing preflight invisible — exactly the
   failure you would be trying to diagnose.
 - **CORS wrapping the whole mux**, so `/ws` and every route added later inherit the policy.
+- **Auth inside CORS, wrapping the mux.** A browser preflight (`OPTIONS` carrying
+  `Access-Control-Request-Method`) carries no `Authorization` header — the browser strips it — so
+  Auth outside CORS would 401 every preflight; CORS answers those itself before Auth ever sees them
+  ([`ADR-017`](./ADR/ADR-017.md) Decision §2). Auth wraps the whole mux for the same "route added
+  later" reason CORS does.
 
-A per-IP rate limiter, when it lands, goes *inside* CORS so a preflight is never rate-limited.
+A per-IP rate limiter, when it lands, goes *inside* CORS (alongside Auth) so a preflight is never
+rate-limited.
 
 #### The one that will bite you: `http.Hijacker`
 
@@ -308,35 +325,56 @@ SUPABASE_URL=
 SUPABASE_JWT_SECRET=
 ```
 
-### `.env.example` is documentation, not a loader
-
-Copying this file to `.env` and filling in values is the usual workflow for a project like this
-one — and it **does not work here**. Grep `backend/*.go` for `godotenv` or `dotenv` and you'll
-find nothing: the server reads real environment variables through `os.Getenv` only (`backend/main.go`)
-— no `.env` file is ever opened. That's deliberate, not an oversight: one stdlib call needs no new
-dependency, consistent with this repo's stdlib-first rule (`docs/ADR/ADR-001.md`). It does mean a
-`.env` sitting next to `server.exe` is completely inert — you'll get `503 route service is not
-configured` from `POST /rides/{code}/route`, with nothing pointing you at why.
-
-Set the variable in the shell that runs the server instead:
+### Copy it to `.env` — that works
 
 ```powershell
-$env:ORS_API_KEY = "your-key-here"
-cd backend
+Copy-Item .env.example .env
+# fill in the values, then:
 go run .
 ```
 
-That value lives only in **this** PowerShell session — close the window, or open a new one, and
-it's gone; you set it again. In a deployment it isn't your problem at all: the platform sets it
-(Koyeb's dashboard — see *Deploying* below), which is exactly why a `.env` loader was never added.
-Local dev and production end up using the same mechanism, real environment variables, instead of
-two different ones.
+`backend/env.go` reads `.env` from the working directory at startup, before anything calls
+`os.Getenv`. You'll see it confirmed in the first log line:
+
+```json
+{"level":"INFO","msg":"loaded .env","vars":["SUPABASE_JWT_SECRET","SUPABASE_URL","ORS_API_KEY"]}
+```
+
+**Variable names only, never values** — these are secrets, and the log is the one place they must
+not appear. If a variable you expected is missing from that list, it's missing from the file (or the
+line is malformed and was skipped).
+
+Three things worth knowing:
+
+- **A real environment variable always wins.** `.env` never overwrites something already set in the
+  environment, so it's a local-development convenience that cannot shadow what a deployment
+  configured. Setting a value in the shell still works and still takes precedence:
+  ```powershell
+  $env:ORS_API_KEY = "your-key-here"   # beats whatever .env says
+  ```
+- **A missing `.env` is not an error.** The deployed case has no file at all — the server reads the
+  environment and logs nothing about it.
+- **A malformed line is skipped, not fatal.** A typo on line three costs you line three; the
+  variables around it still load.
+
+`backend/.gitignore` already excludes `.env` and everything matching `.env.*`, with `!.env.example`
+negated back in — so the file you just created is not committable by accident.
+
+**Why this exists at all**, since the format is trivial and this repo is dependency-averse: it used
+to be that no `.env` was ever read, on the reasoning that `os.Getenv` needs no dependency. The
+reasoning was fine; the failure mode was not. A filled-in `.env` sitting inert produced a `503 route
+service is not configured` from an endpoint, with nothing connecting that symptom to the file — and
+copying `.env.example` to `.env` is the first thing anyone tries. `env.go` is about thirty lines of
+`strings.Cut` and adds no dependency (`go.mod` is still two direct, zero indirect), so
+`docs/ADR/ADR-001.md`'s stdlib-first rule is satisfied by writing the parser rather than by refusing
+the feature.
 
 ### `ALLOWED_ORIGINS`
 
-**Purpose.** The allowlist of browser origins permitted to call the HTTP API. It is the only
-input to the CORS wrapper from §5 — nothing else configures it. It does **not** yet guard the
-WebSocket upgrade; that is a separate, still-open piece of work (see the deferred list below).
+**Purpose.** The allowlist of browser origins permitted to call the HTTP API. It is the input to
+the CORS wrapper from §5, and `internal/hub.Hub.checkOrigin` reads the same parsed list to gate the
+`/ws` upgrade (an empty list means allow-all there too, matching CORS's own dev default) — one
+`ALLOWED_ORIGINS` value now governs both.
 
 **Format.** A comma-separated list of origins. An origin is *scheme + host + port* and nothing
 else — no path, and **no trailing slash**.
@@ -416,9 +454,10 @@ LOG_LEVEL=debug
 
 Two deliberate omissions in that line:
 
-- **No query string.** `/ws` carries `?name=` and `?rider=` — a rider's display name and their
-  identity across reconnects. Only `r.URL.Path` is logged, never `RawQuery` or `RequestURI`, and
-  never a request body.
+- **No query string.** `/ws` carries `?name=` — a rider's display name. Only `r.URL.Path` is
+  logged, never `RawQuery` or `RequestURI`, and never a request body. Headers are not logged
+  either, which is what keeps the `Authorization` bearer token out of the log
+  (`docs/ADR/ADR-017.md`). Identity used to ride in `?rider=`; it is now the JWT's `sub`.
 - **No proxy awareness.** `remote` is the address the server sees. Behind the Cloudflare Tunnel
   that becomes the tunnel's address for every request; fixing that needs `X-Forwarded-For`
   handling, which is deliberately deferred — trusting that header without knowing the hop count
@@ -551,7 +590,7 @@ URL derives from it (`http` → `ws`, `https` → `wss`), so there is only ever 
   is how it addresses the host machine. This is the file's default.
 - **Physical device** — your computer's LAN IP, e.g. `http://192.168.1.20:8080`. Both `localhost`
   and `10.0.2.2` fail on real hardware.
-- **Deployed** — the Koyeb URL (`https://…`, which derives `wss://`).
+- **Deployed** — the Cloudflare Tunnel URL (`https://…`, which derives `wss://`).
 
 `docs/SETUP.md` covers the app side, including the fact that a `preview` build bakes this value in
 at bundle time — so set it before building, not after.
@@ -560,84 +599,79 @@ at bundle time — so set it before building, not after.
 
 ## Deploying
 
-Two paths, for two different needs. **Koyeb** is the real deployment — it builds
-`backend/Dockerfile` from GitHub on every push and gives you a stable `https://` URL, free and
-without a card. **Cloudflare Tunnel** is faster to stand up for a one-off: no build, no commit, no
-Dockerfile — it just puts TLS in front of the binary you already have running locally.
+**Cloudflare Tunnel, in front of the binary you run yourself.** No build step, no commit, no
+container registry, no platform account — `cloudflared` puts TLS and a public hostname in front of
+`http://localhost:8080` with no inbound ports open.
 
-### Koyeb (primary)
-
-`backend/Dockerfile` and `backend/.dockerignore` exist for exactly this. The Dockerfile is a
-multi-stage build: a `golang:1.26-alpine` stage compiles a fully static binary
-(`CGO_ENABLED=0 GOOS=linux go build -trimpath ...`), and only that binary is copied into
-`gcr.io/distroless/static-debian12:nonroot` — no shell, no package manager, running as uid 65532
-instead of root. `.dockerignore` keeps `*_test.go`, `wstest.mjs`, and any stray `.env` out of the
-build context.
-
-Create a Koyeb app from the GitHub repo with these settings:
-
-| Setting | Value |
-|---|---|
-| Source | GitHub repo |
-| Builder | Dockerfile |
-| Dockerfile path | `backend/Dockerfile` |
-| Work directory | `backend` |
-| Health check | HTTP, path `/healthz` |
-| Env var | `ORS_API_KEY` (mark as **secret**) |
-| Env var | `LOG_LEVEL=info` |
-| Instance | Free |
-
-A few things worth knowing before you click deploy:
-
-- **Don't set `PORT`.** Koyeb injects its own; `main.go` reads it via `os.Getenv("PORT")` and only
-  falls back to `8080` when it's unset. Setting it yourself just risks it disagreeing with what
-  Koyeb actually forwards traffic to. `ORS_API_KEY` and `LOG_LEVEL`, by contrast, you do set — as
-  real Koyeb environment variables in the dashboard, the same mechanism as the `$env:` line in §6
-  above, never a `.env` file baked into the image.
-- **`ALLOWED_ORIGINS` can stay unset.** There is no browser client (`docs/ADR/ADR-007.md`), so
-  CORS — a browser-enforced mechanism — isn't the security boundary for this server. You'll see
-  the "every origin is allowed" warning in the Koyeb logs at startup; that's the expected state
-  here, not a problem to chase down.
-- **The race detector cannot run in this image.** `-race` needs cgo, and the Dockerfile builds
-  with `CGO_ENABLED=0` specifically so the final stage can be `distroless/static`, which has
-  nothing for a dynamically-linked binary to link against. Race testing (`go test -race`) happens
-  against the module in dev/CI, never against the deployed artifact.
-- **Koyeb builds from GitHub, not your working tree.** Commit and push before deploying — an
-  uncommitted change or an unpushed branch simply isn't there when the build runs.
-
-### Cloudflare Tunnel (quick, no build step)
-
-For a tabletop test — everyone in the same room, backend on your laptop, nothing pushed to
-GitHub — put Cloudflare Tunnel in front of the binary you already have running:
-
-1. Run `go run .` (or build a Linux binary for a spare machine:
+1. Run `go run .` (or build a Linux binary for a spare machine that isn't your laptop:
    `GOOS=linux GOARCH=amd64 go build -o server .`).
-2. `cloudflared tunnel --url http://localhost:8080` for TLS/`wss://` with no open inbound ports.
-   Two flavours:
-   - **Quick tunnel** — zero signup, no card, but the `*.trycloudflare.com` URL is random and
-     changes on every restart. Fine for a friend group that re-shares a link.
-   - **Named tunnel** — stable hostname, but needs a domain you own added to Cloudflare (domains
-     cost ~$10/yr — the one place "no card" bends if you want a fixed URL).
-3. Point the app at the tunnel's `https://` URL (`wss://` follows automatically —
-   `mobile/src/core/config.ts`). `ALLOWED_ORIGINS` can stay unset here too, for the same reason as
-   Koyeb above — set it only if you're also fronting some browser-based tooling through the same
-   tunnel (see §5, *The CORS wrapper*).
+2. `cloudflared tunnel --url http://localhost:8080`.
+3. Point `mobile/src/core/config.ts` at the tunnel's `https://` URL — `wss://` derives from it.
+
+### Pick the tunnel flavour before you build the app, not after
+
+This is the decision that actually bites, because `eas build --profile preview` **bakes `BASE_URL`
+into the bundle**. The URL is not configurable after the fact; changing it means every rider
+reinstalls.
+
+| | URL | Cost | Good for |
+|---|---|---|---|
+| **Quick tunnel** | random `*.trycloudflare.com`, new on every restart | free, no signup | a tabletop test where everyone reinstalls anyway |
+| **Named tunnel** | stable hostname you choose | a domain you own, ~$10/yr | an actual ride |
+
+A quick tunnel and a `preview` build are close to incompatible for real use: restart the tunnel and
+every installed APK is pointing at a dead hostname. For a road test you want the named tunnel.
+
+That domain cost is the one place `docs/ADR/ADR-006.md`'s "no card" rule genuinely bends, and it is
+worth naming rather than hiding: everything else in this stack is free with an email, and this is
+not. The alternative is accepting that the URL changes and rebuilding before each ride.
+
+### Notes that apply either way
+
+- **`ALLOWED_ORIGINS` can stay unset.** There is no browser client (`docs/ADR/ADR-007.md`), so
+  CORS — a browser-enforced mechanism — isn't the security boundary here. The "every origin is
+  allowed" warning at startup is the expected state, not a problem to chase.
+- **`SUPABASE_JWT_SECRET` must be set or the process exits** (`docs/ADR/ADR-017.md` §7). Set it the
+  same way as `ORS_API_KEY` — a real environment variable, never a `.env` baked into an image.
+- **`PORT` defaults to 8080** and `main.go` reads `os.Getenv("PORT")` if a host injects one. Running
+  it yourself, leave it alone.
+- **The race detector can't run against a `distroless/static` image.** `-race` needs cgo, and
+  `backend/Dockerfile` builds with `CGO_ENABLED=0` so the final stage can be static. `go test -race`
+  runs against the module in dev, never the deployed artifact.
+
+### If you later want a always-on host instead
+
+`backend/Dockerfile` and `backend/.dockerignore` are still here and still correct — a multi-stage
+build compiling a static binary into `gcr.io/distroless/static-debian12:nonroot` (no shell, no
+package manager, uid 65532). Any container host that reads a Dockerfile will take it; the app is a
+single stateless binary with in-memory rooms (`docs/ADR/ADR-010.md`), so nothing about it needs a
+specific provider. Set `ORS_API_KEY`, `SUPABASE_JWT_SECRET`, `SUPABASE_URL` and the `LIVEKIT_*` vars
+as environment variables there, and let the host inject `PORT`.
 
 ### Security reality check
 
-Either path above puts an **unauthenticated WebSocket server on the public internet**. Be honest
-with yourself about what that means before you send the URL to anyone:
+Every route this server answers — including the `/ws` upgrade — now requires a verified Supabase
+JWT (`docs/ADR/ADR-017.md`), so "unauthenticated WebSocket server on the public internet" is no
+longer an honest description. Be just as honest about what auth does **not** buy you, though,
+before you send the URL to anyone:
 
-- **`/ws` has no auth.** Supabase JWT verification is designed (`docs/ADR/ADR-008.md`) but not
-  implemented — anyone who reaches the URL with a valid ride code can join.
-- **`upgrader.CheckOrigin` returns `true` for every request** (`backend/internal/hub/hub.go`) —
-  nothing checks where a WebSocket upgrade came from.
+- **Anyone with a Supabase account and a valid 6-character ride code can join that room.** Auth
+  proves *who* is asking, not that they were invited to *this* ride — the join code is still the
+  only membership check, and Supabase's anonymous sign-in (`docs/ADR/ADR-016.md`) means "an
+  account" costs a rider nothing to get. What auth actually rules out is anonymous traffic and
+  rider-id spoofing, not a stranger who's been handed the code.
+- **The ORS quota is still shared and still burnable.** `POST /rides/{code}/route` and
+  `POST /geocode` both require a token now, but nothing throttles how many requests one valid
+  account can send — auth adds identity to the quota's consumers, it doesn't ration it.
 - **There is no rate limiting**, and no cap on the number of rooms or connections.
+- **`upgrader.CheckOrigin`** (`backend/internal/hub/hub.go`) checks the same `ALLOWED_ORIGINS`
+  allowlist CORS uses — but that allowlist is empty (allow-all) by default, which is the
+  deliberate zero-config posture the `ALLOWED_ORIGINS` section above describes; set it for any
+  deployment that should reject unlisted origins.
 
-The only real gate is the join code itself: 6 characters from a 32-character alphabet — about 1.07
-billion possibilities — and a room is garbage-collected 5 minutes after it empties, including a
-code nobody ever joined. That's a reasonable barrier for a handful of friends on a URL nobody else
-has, and it is not an auth boundary for anything more exposed than that.
+The join code itself — 6 characters from a 32-character alphabet, about 1.07 billion
+possibilities, garbage-collected 5 minutes after the room empties — remains the actual membership
+boundary. Auth sits on top of it; it does not replace it.
 
 ---
 
@@ -648,19 +682,8 @@ has, and it is not an auth boundary for anything more exposed than that.
   through this server, proves the toolchain end to end (`docs/SYSTEM_DESIGN.md §11`).
 
 ### What's deliberately deferred
-- **`POST /rides/{code}/route`** — ORS driving-car proxy + storing the polyline on the room (Phase 2).
-- **`POST /rides/{code}/voice-token`** — LiveKit JWT minting (Phase 3).
 - **`wss://` in production** — the dev server still speaks plaintext `ws://`; switching to TLS is
   a deployment step (see *Deploying*, above), not something `docs/ADR/ADR-010.md` touches.
-- **Supabase JWT verification middleware** — the Go server verifies (never mints) Supabase-issued
-  JWTs before trusting a caller's identity; not yet implemented (`docs/ADR/ADR-008.md`).
-- **Redacting `Authorization` in the logging middleware** — once JWTs flow through `/ws`, the
-  logging middleware (`internal/httpx/logging.go`) must not let a bearer token reach the log
-  stream unredacted (`docs/ADR/ADR-008.md`).
-- **WebSocket origin enforcement** — `upgrader.CheckOrigin` still returns `true` for every
-  request. The CORS wrapper in §5 covers the *HTTP* API only; CORS does not apply to a WebSocket
-  handshake, so `ALLOWED_ORIGINS` currently has no effect on `/ws`. Wiring the same allowlist into
-  `CheckOrigin` is its own task, and it must land before the server is publicly reachable.
 - **Panic recovery for the hub's goroutines** — `Recover` covers the HTTP handler chain only. The
   sweep goroutine, `readPump`, and `writePump` run outside it, and an unrecovered panic in *any*
   goroutine still terminates the process (`docs/ADR/ADR-010.md`).
@@ -668,3 +691,10 @@ has, and it is not an auth boundary for anything more exposed than that.
 - **Hub lifecycle logging** — connect, disconnect, room create/destroy, dropped frame, malformed
   message and unknown ride code are not logged yet. The request log covers the HTTP edge; nothing
   inside `internal/hub` emits anything.
+
+**No longer deferred, since this section was last true:** `POST /rides/{code}/route` (ORS proxy,
+Phase 2), `POST /rides/{code}/voice-token` (LiveKit JWT minting, `docs/ADR/ADR-020.md`/
+`docs/ADR/ADR-022.md`), Supabase JWT verification on every route (`docs/ADR/ADR-017.md`), and
+`CheckOrigin` honoring `ALLOWED_ORIGINS` are all implemented — see the *Security reality check*
+above for what auth still doesn't cover. Redacting `Authorization` from the access log turned out
+to need no work: `internal/httpx/logging.go` only ever logged `r.URL.Path`, never headers.

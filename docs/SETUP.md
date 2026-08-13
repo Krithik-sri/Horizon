@@ -1,9 +1,9 @@
 # App setup — React Native (Expo + dev client), TypeScript
 
-> **Goal (this MVP):** create a ride, 2–3 riders join by code, everyone sees everyone move on a
-> shared map, a long-press sets a destination and a route line + next-turn cue appear on every
-> phone. **No accounts, no sign-in, no voice** — those are later phases, referenced below but not
-> part of what you're setting up today.
+> **Goal:** create a ride, riders join by code, everyone sees everyone move on a shared map, set a
+> destination and get a route line, spoken turn-by-turn, and push-to-talk voice — the whole app,
+> not a slice of it. Every rider is signed in, anonymously and with no signup step (`ADR-016`),
+> because `/ws` now refuses a connection without a verified Supabase JWT (`ADR-017`).
 >
 > **No credit card needed.** The map uses MapLibre + OpenFreeMap (no key, no signup);
 > directions come from OpenRouteService via your Go backend (free key, no card) — that key lives
@@ -23,20 +23,28 @@ This is **the** setup guide for Horizon — the only client is this app
 
 `mobile/src/` is a working app, not a template — read this before you start.
 
-**Built:**
-- **Departure register** (`src/app/index.tsx`) — enter a name, start a ride (get a join code) or
-  join one by code.
+**Built — all four route groups, code-complete:**
+- **Departure register** (`src/app/index.tsx`) — sign-in (anonymous, [`ADR-016`](./ADR/ADR-016.md)),
+  start a ride (get a join code) or join one by code, permission prompts asked once.
 - **Motion register** (`src/app/ride/[code].tsx`) — the map, every rider's dot, the Horizon Line
-  HUD (speed + next-turn cue), long-press to set a destination.
+  HUD, spoken turn-by-turn ([`ADR-015`](./ADR/ADR-015.md)), personal off-route rerouting
+  ([`ADR-014`](./ADR/ADR-014.md)), and push-to-talk voice ([`ADR-020`](./ADR/ADR-020.md)).
+- **The planner** (`src/app/plan/[code].tsx`) — a multi-stop route with alternatives, previewed
+  before it's committed to the room ([`ADR-013`](./ADR/ADR-013.md)).
+- **The Return register** (`src/app/return/`) — the archive list and per-ride detail, backed by
+  Supabase, reflective-only per the no-ranking rule ([`ADR-018`](./ADR/ADR-018.md),
+  [`ADR-019`](./ADR/ADR-019.md)).
 - The WebSocket client (`src/core/wsClient.ts`) — connect, reconnect with backoff + jitter, ~1 Hz
-  location throttle.
+  location throttle, a Supabase JWT on every attempt.
 - The route client (`src/core/route.ts`) — `POST /rides/{code}/route`.
+- Background location (`src/core/backgroundLocation.ts`) — one GPS subscription that survives the
+  screen going off, behind an Android foreground service ([`ADR-021`](./ADR/ADR-021.md)); the
+  screen is still kept on as a belt-and-braces measure, now via manual `activateKeepAwakeAsync`/
+  `deactivateKeepAwake` rather than the `useKeepAwake()` hook (`ride/[code].tsx`).
 - Design tokens (`src/design/tokens.ts`) — the only source of color/type/spacing in the app.
 
-**Not built:** sign-in (no auth at all yet — [`ADR-008`](./ADR/ADR-008.md) describes the
-eventual design), voice, the Return register (journal/photos/stats), and background location
-(foreground tracking only — the screen has to stay on, which is why `ride/[code].tsx` calls
-`useKeepAwake()`).
+**Not proven:** none of the above has been run on a real device yet — that gap, not a missing
+feature, is this project's actual state (`CLAUDE.md` Status).
 
 You're about to: confirm dependencies (§2), point the app at a running backend (§13), build a
 dev client once (§5), then run it (§13).
@@ -76,12 +84,14 @@ Still needed:
   ```powershell
   adb devices   # should list at least one device/emulator
   ```
-- **A running backend** — see [`docs/SETUP_BACKEND.md`](./SETUP_BACKEND.md). Its only account
-  requirement for this MVP is **OpenRouteService** (free key, no card, `driving-car` profile —
-  ORS has no motorcycle profile) — and that key lives on the backend, never in this app.
+- **A running backend** — see [`docs/SETUP_BACKEND.md`](./SETUP_BACKEND.md). It needs
+  **OpenRouteService** (free key, no card, `driving-car` profile — ORS has no motorcycle profile),
+  a **Supabase** project with the legacy HS256 JWT secret and anonymous sign-ins enabled
+  ([`ADR-016`](./ADR/ADR-016.md), [`ADR-017`](./ADR/ADR-017.md) — the server refuses to boot
+  without `SUPABASE_JWT_SECRET`), and **LiveKit Cloud** for voice
+  ([`ADR-020`](./ADR/ADR-020.md)). All three are free with no card; every secret lives on the
+  backend, never in this app.
 - **The map needs nothing.** OpenFreeMap tiles are keyless, no signup.
-- **Not needed for this MVP — don't create these accounts yet:** Supabase (auth is deferred,
-  [`ADR-008`](./ADR/ADR-008.md)) and LiveKit Cloud (voice is Phase 3, §11).
 
 ✅ **Checkpoint:** `eas whoami` prints your username, and `adb devices` lists a device once an
 emulator/phone is connected.
@@ -90,20 +100,19 @@ emulator/phone is connected.
 
 ## 2. Verify dependencies
 
-Everything this MVP needs is already in `mobile/package.json` — confirm rather than install:
+Everything the app needs is already in `mobile/package.json` — confirm rather than install. The
+list below is a sample, not the full set (voice alone pulls in four LiveKit packages) — read
+`package.json` for the rest:
 
 ```powershell
 cd mobile
-npm ls @maplibre/maplibre-react-native expo-location expo-task-manager @react-native-async-storage/async-storage @expo-google-fonts/inter expo-keep-awake zustand
+npm ls @maplibre/maplibre-react-native expo-location expo-task-manager @react-native-async-storage/async-storage @expo-google-fonts/inter @supabase/supabase-js @livekit/react-native expo-speech zustand
 ```
 
 > The WebSocket client needs **no package** — React Native ships a global `WebSocket`.
 
-✅ **Checkpoint:** every package above resolves with no `UNMET DEPENDENCY` errors. (Exact
-installed versions live in `mobile/package.json` — currently `expo-location@~56.0.22`,
-`expo-task-manager@~56.0.24`, `@react-native-async-storage/async-storage@2.2.0`,
-`@expo-google-fonts/inter@^0.4.2`, `expo-keep-awake@~56.0.3`. `react-native-web` and `react-dom`
-have already been removed — there is no web client, [`ADR-007`](./ADR/ADR-007.md).)
+✅ **Checkpoint:** every package above resolves with no `UNMET DEPENDENCY` errors. `react-native-web`
+and `react-dom` have already been removed — there is no web client, [`ADR-007`](./ADR/ADR-007.md).
 
 ---
 
@@ -131,9 +140,10 @@ Already in place — read it there, don't recreate it. Two things worth knowing 
   wasn't a dependency yet; it is now (§2), so `npx expo config` and `npx expo prebuild` both
   work.
 
-No map tokens anywhere. The only secret in the project today is the ORS key (LiveKit's secret
-and the Supabase JWT secret join it once those phases land) — all of them live on the **Go
-backend**, never in the app.
+No map tokens anywhere. The ORS key, the LiveKit secret, and the Supabase JWT secret all live on
+the **Go backend**, never in the app — the app only ever holds the public Supabase `anon` key,
+which is safe to ship because Postgres Row-Level Security, not secrecy, protects it
+([`ADR-017`](./ADR/ADR-017.md)).
 
 ✅ **Checkpoint:** `npx expo config --type prefab` prints merged config with `scheme: "horizon"`
 and every plugin listed, no errors.
@@ -166,10 +176,11 @@ in the EAS dashboard/terminal output — send that link to each rider's phone di
 store. The very first build you ever run also mints this project's EAS `projectId` (already
 present as `extra.eas.projectId` in `mobile/app.config.ts`, from an earlier build).
 
-**`mobile/src/core/config.ts` is baked into a `preview` build at bundle time.** Set
-`KOYEB_BASE_URL` there to your deployed backend's `https://…` host **before** you build preview,
-not after — changing it later means every rider needs a fresh APK; there's no over-the-air
-update path for this yet.
+**`EXPO_PUBLIC_HORIZON_API_URL` is baked into a `preview` build at bundle time**, via `eas.json`'s
+`build.preview.env` (EAS does not upload `.env`, so anything unset there silently falls back to
+the Android-emulator default in `mobile/src/core/config.ts`). Set it to your deployed backend's
+`https://…` host **before** you build preview, not after — changing it later means every rider
+needs a fresh APK; there's no over-the-air update path for this yet.
 
 Rebuild only when you add or upgrade a **native** dependency — that applies to `development`,
 where JS-only changes hot-reload. A `preview` build has no such shortcut: cut a fresh one
@@ -189,8 +200,9 @@ for the full tree.
   `src/app/index.tsx` (the Departure register: name, start/join a ride).
 - **`src/core/`** — everything that isn't UI: `config.ts` (backend URL, §13), `models.ts` (the
   wire protocol types, mirroring `CLAUDE.md`'s WebSocket contract field-for-field),
-  `riderId.ts` (a stable per-install id, so a reconnect replaces your old connection instead of
-  leaving a ghost — §7), `wsClient.ts` (connect/reconnect/throttle, §7), `route.ts` (the
+  `supabase.ts` (the Supabase client and session — the rider's id is now the JWT's `sub`, not a
+  client-generated one, so a reconnect replaces the old connection instead of leaving a ghost —
+  `ADR-017`, §7), `wsClient.ts` (connect/reconnect/throttle, §7), `route.ts` (the
   `POST /rides/{code}/route` call, §10).
 - **`src/state/useRide.ts`** — the one zustand store. Owns the live `riders` list, your own GPS
   fix, the current route, and connection status; every screen reads from here rather than
@@ -218,30 +230,36 @@ The real implementation is `mobile/src/core/wsClient.ts` (connect) and
 `mobile/src/core/config.ts` (the URL) — read them there rather than a paraphrase here. Worth
 knowing before you do:
 
-- **No auth today.** The MVP sends no token at all on the WebSocket upgrade. Whenever Supabase
-  auth lands ([`ADR-008`](./ADR/ADR-008.md)), the rule stays the same either way: never put a
-  token in the `/ws` query string — `backend/internal/httpx/logging.go` logs request URLs.
+- **Every request carries a Supabase JWT**, including the WebSocket upgrade, as
+  `Authorization: Bearer <token>` ([`ADR-017`](./ADR/ADR-017.md)). Riders are signed in
+  anonymously at first launch, so this costs no sign-up step ([`ADR-016`](./ADR/ADR-016.md)).
+  Never put a token in the `/ws` query string — not because this server's log would capture it
+  (`backend/internal/httpx/logging.go` logs `r.URL.Path` only), but because a URL is exposed to
+  proxies and CDN logs in a way a header is not.
 - **Reconnect is automatic**, with exponential backoff and full jitter, capped at 15s
   (`MAX_BACKOFF_MS`) — mobile networks drop constantly. A 404 (unknown or expired ride code) is
   treated as terminal and not retried forever.
 - **Location sends are throttled to ~1 Hz** (`MIN_LOC_INTERVAL_MS`) even if GPS fires faster.
-- Every device presents a stable `riderId` (`src/core/riderId.ts`, persisted in AsyncStorage) so
-  a reconnect **replaces** the old connection instead of leaving a ghost rider on everyone's map.
+- The rider id is the `sub` claim of the verified Supabase JWT, not a client-generated value —
+  `riderId.ts` is gone — so a reconnect **replaces** the old connection instead of leaving a
+  ghost rider on everyone's map, and the id can no longer be spoofed ([`ADR-017`](./ADR/ADR-017.md)).
 
 ---
 
-## 8. Location — foreground only (background is Phase 4)
+## 8. Location — one subscription, foreground and background alike
 
-The real foreground location loop lives in `src/app/ride/[code].tsx` — read it there. In short:
-on mount it checks (never re-prompts mid-ride — that's exactly the interruption `CLAUDE.md`
-forbids) for foreground permission, and if granted starts `Location.watchPositionAsync` at 1 Hz,
-feeding fixes into `useRide().sendLoc`. The permission prompt itself lives in
-`src/app/index.tsx` (Departure), asked once before a ride starts.
+The real implementation is `src/core/backgroundLocation.ts` — read it there.
+`Location.startLocationUpdatesAsync` with an Android foreground service is the **only** source of
+fixes now, in both foreground and background; there is no separate `watchPositionAsync` effect to
+hand off from ([`ADR-021`](./ADR/ADR-021.md)). The `expo-task-manager` task calls the same
+`useRide.getState().sendLoc` the UI called before, is registered at module scope so it also runs
+in a headless restart, and rejoins from a persisted ride code if the JS context did not survive a
+process death. Background permission is requested once, in Departure (`src/app/index.tsx`),
+alongside foreground — denial degrades to foreground-only tracking rather than breaking anything.
 
-`expo-task-manager` is installed but **not wired to anything yet**. Background tracking (screen
-locked, phone in a pocket) is Phase 4 in `CLAUDE.md`'s build order, not part of this MVP.
-`useKeepAwake()` in `ride/[code].tsx` is the current stand-in — it keeps the screen on for the
-whole ride so foreground tracking never pauses.
+This is the one phase of this project furthest from proven: it is code-complete but has never run
+on a real ride, and `ADR-021`'s Future Revisions section names exactly what to watch for
+(task-delivery latency, background JS timer throttling) once it does.
 
 ---
 
@@ -294,42 +312,19 @@ map converges on the same line.
 
 ---
 
-## 11. Push-to-talk voice — `@livekit/react-native` (Phase 3, not part of this MVP)
+## 11. Push-to-talk voice — `@livekit/react-native`
 
-Nothing under `mobile/src/` implements this yet — the shape below is a forward reference so it
-doesn't need re-deriving when Phase 3 starts, not a description of working code.
+Implemented — read `src/features/convoy/useVoice.ts` and `src/features/motion/PushToTalk.tsx`
+rather than a paraphrase here. In short: the Motion screen connects on mount with the microphone
+muted and stays subscribed to the rest of the convoy from the first metre; the PTT control is the
+invisible bottom 42% of the screen (`HorizonLine`'s *Held* band), operable by feel, rendering
+nothing at rest ([`ADR-020`](./ADR/ADR-020.md)). The token comes from your Go backend,
+`POST /rides/{code}/voice-token` (`src/core/voiceToken.ts`), minted with `golang-jwt` rather than
+`livekit/protocol` to avoid 68 indirect modules ([`ADR-022`](./ADR/ADR-022.md)).
 
-```tsx
-import { LiveKitRoom, AudioSession, useLocalParticipant } from "@livekit/react-native";
-import { useEffect } from "react";
-
-// token + url come from your Go backend: POST /rides/{code}/voice-token
-function Voice({ url, token }: { url: string; token: string }) {
-  useEffect(() => {
-    AudioSession.startAudioSession();
-    return () => { AudioSession.stopAudioSession(); };
-  }, []);
-  // audio={false} → mic starts muted; un-mute only while the PTT button is held
-  return (
-    <LiveKitRoom serverUrl={url} token={token} connect audio={false}>
-      <PttButton />
-    </LiveKitRoom>
-  );
-}
-
-function PttButton() {
-  const { localParticipant } = useLocalParticipant();
-  return (
-    <Pressable
-      onPressIn={() => localParticipant.setMicrophoneEnabled(true)}
-      onPressOut={() => localParticipant.setMicrophoneEnabled(false)}
-    >
-      <Text>Hold to talk</Text>
-    </Pressable>
-  );
-}
-```
-You'd stay subscribed to everyone else's audio automatically; only *your* mic toggles.
+Voice is deliberately exempt from the corner rule — the app never mutes, ducks, or delays a
+co-rider, at any point (`ADR-020` Decision §1). If the backend answers 503 (LiveKit env unset) or
+the token fetch fails, no PTT control renders at all rather than an affordance that does nothing.
 
 ---
 
@@ -343,27 +338,35 @@ mobile/
   src/
     app/
       _layout.tsx              root: Inter fonts, splash, gesture handler
-      index.tsx                Departure register — create / join a ride
-      ride/[code].tsx           Motion register — map, HUD, GPS
+      index.tsx                Departure register — sign in, create / join a ride
+      ride/[code].tsx          Motion register — map, HUD, GPS, voice, spoken guidance
+      plan/[code].tsx          planner — multi-stop route, alternatives (§ADR-013)
+      return/                  archive list + per-ride detail (index.tsx, [id].tsx)
     core/
       config.ts                 backend base URL (HTTP + derived WS)
-      models.ts                 wire protocol types
-      riderId.ts                 stable per-install rider id (AsyncStorage)
+      models.ts / wsProtocol.ts wire protocol types
+      supabase.ts                Supabase client, session, anonymous sign-in
       wsClient.ts                 WebSocket + reconnect backoff + 1 Hz loc throttle
       wsClient.check.ts            runnable self-check (§6)
-      route.ts                      POST /rides/{code}/route
+      route.ts / route.pure.ts      POST /rides/{code}/route + pure helpers
+      backgroundLocation.ts          the task from §8 (ADR-021)
+      voiceToken.ts                   POST /rides/{code}/voice-token
+      rides.ts / routePlans.ts         Supabase reads/writes for Return + planner
+      rideTrack.ts / routeProgress.ts / bearing.ts   plus their `.check.ts` self-checks
     state/
       useRide.ts                     zustand store
     design/
       tokens.ts                       the DESIGN.md token set, authoritative
     features/
-      motion/    HorizonLine.tsx · AheadCue.tsx · SpeedReadout.tsx
-      convoy/    MapCanvas.tsx · RiderMarkers.tsx · RouteLine.tsx
+      motion/     HorizonLine.tsx · AheadCue.tsx · SpeedReadout.tsx · PushToTalk.tsx · EndRide.tsx
+      convoy/     MapCanvas.tsx · RiderMarkers.tsx · RouteLine.tsx · RejoinLine.tsx · useVoice.ts
+      departure/  PlannerMap.tsx · DestinationSearch.tsx
+      return/     RideCard.tsx · RideFacts.tsx · RideTrace.tsx · JournalNote.tsx · PhotoStrip.tsx
 ```
 
-`features/departure/` and `features/return/` don't exist yet — Departure is still one screen and
-the Return register hasn't started, so nothing has needed splitting out of `src/app/index.tsx`
-yet. Add those directories when a second screen in either register does.
+`riderId.ts` is gone — the rider id is now the `sub` claim of the verified Supabase JWT, not a
+client-generated one (`ADR-017`). `features/departure/` and `features/return/` both exist now;
+the note that they didn't is stale.
 
 ---
 
@@ -382,7 +385,8 @@ In order:
    - A physical device (Android or iOS): your computer's LAN IP, e.g.
      `http://192.168.1.20:8080` — neither `10.0.2.2` nor `localhost` reach your machine from
      real hardware.
-   - A deployed backend: fill in `KOYEB_BASE_URL` with the `https://…` host — `WS_BASE_URL`
+   - A deployed backend: fill in `EXPO_PUBLIC_HORIZON_API_URL` (in `mobile/.env` for local runs,
+     or `eas.json`'s `build.preview.env` for EAS builds) with the `https://…` host — `WS_BASE_URL`
      derives `wss://` from it automatically. **Do this before running
      `eas build --profile preview`** (§5) — it's baked into that build at bundle time.
 
@@ -421,15 +425,14 @@ first. When you pick it up:
 - A long-press on either phone draws the same route line, in the same place, on both phones.
 - Turning one phone's network off greys that rider out on the other phone within ~10s (`ageSec`,
   `CLAUDE.md`'s WebSocket protocol). Turning it back on reconnects that rider as the **same**
-  dot, not a second one (stable `riderId`, §7) — a rider who loses signal comes back as one rider,
-  not two.
+  dot, not a second one (the JWT-derived rider id, §7) — a rider who loses signal comes back as
+  one rider, not two.
 
 ---
 
 ### Notes / gotchas
-- **Zero map cost / zero card.** OpenFreeMap tiles are free and keyless; the ORS key lives only
-  on the backend. LiveKit's and Supabase's secrets will too, once those phases start — this MVP
-  doesn't use either.
+- **Zero map cost / zero card.** OpenFreeMap tiles are free and keyless; the ORS key, LiveKit's
+  secret, and the Supabase JWT secret all live only on the backend, never in this app.
 - **Not Expo Go.** MapLibre needs native code, so always run a dev client — `development` while
   building, `preview` for a standalone install — never the Expo Go app.
 - **`development` and `preview` are not interchangeable** (§5). `development` needs Metro
@@ -440,8 +443,8 @@ first. When you pick it up:
 - **Emulator can't reach `localhost`.** The Android emulator reaches your host machine at
   `10.0.2.2`; a physical device needs your computer's LAN IP. `localhost` only works for the
   iOS simulator.
-- **Background location isn't built yet.** `expo-task-manager` is installed but unused — that's
-  Phase 4, not this MVP. The screen has to stay on (`useKeepAwake()`) for now.
+- **Background location is built but unproven.** `expo-task-manager` backs the one GPS
+  subscription described in §8 (`ADR-021`) — code-complete, never run on a real ride.
 - **Coordinate order:** MapLibre uses `[lng, lat]`; `loc`/`state` messages use `lat`/`lng`
   fields. `src/core/models.ts` encodes the convention in its type names, not just comments —
   keep it straight wherever you draw markers or routes.
