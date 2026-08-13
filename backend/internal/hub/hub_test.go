@@ -5,20 +5,64 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/krithik/horizon/backend/internal/auth"
 )
 
-// dialRide dials /ws for the given ride code and rider id, consumes the welcome frame,
-// and returns the client connection. t.Fatal on any failure.
+// testIssuer is the ES256 JWKS issuer every ServeWS test in this file verifies against
+// — see newAuthedServer and authHeader. Started once for the whole test binary by
+// TestMain, since it owns a real httptest.Server.
+var testIssuer *auth.TestIssuer
+
+func TestMain(m *testing.M) {
+	issuer, err := auth.NewTestIssuer()
+	if err != nil {
+		panic(fmt.Sprintf("hub_test: auth.NewTestIssuer: %v", err))
+	}
+	testIssuer = issuer
+
+	code := m.Run()
+	issuer.Server.Close()
+	os.Exit(code)
+}
+
+// newAuthedServer wraps h.ServeWS in the same auth.Verifier.Require middleware
+// main.go's real chain puts in front of it. Without this, a direct
+// httptest.NewServer(http.HandlerFunc(h.ServeWS)) never populates the request context
+// auth.Subject reads from, so ServeWS would seat every rider under the empty string
+// (docs/ADR/ADR-017.md Decision §6 — the rider id is the verified JWT subject, not a
+// query parameter, and ServeWS itself does no verification of its own).
+func newAuthedServer(h *Hub) *httptest.Server {
+	v := auth.New(testIssuer.URL, nil)
+	return httptest.NewServer(v.Require(http.HandlerFunc(h.ServeWS)))
+}
+
+// authHeader mints a token for subject sub against testIssuer and returns it as the
+// http.Header the WebSocket dialer expects — the JWT stands in for the old ?rider=
+// query parameter (docs/ADR/ADR-017.md Decision §6).
+func authHeader(t *testing.T, sub string) http.Header {
+	t.Helper()
+	tok, err := testIssuer.MintToken(sub)
+	if err != nil {
+		t.Fatalf("minting test token: %v", err)
+	}
+	return http.Header{"Authorization": {"Bearer " + tok}}
+}
+
+// dialRide dials /ws for the given ride code, presenting rider as the bearer token's
+// subject, consumes the welcome frame, and returns the client connection. t.Fatal on
+// any failure.
 func dialRide(t *testing.T, srv *httptest.Server, code, rider string) *websocket.Conn {
 	t.Helper()
-	u := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ride=" + code + "&rider=" + rider
-	conn, _, err := websocket.DefaultDialer.Dial(u, nil)
+	u := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ride=" + code
+	conn, _, err := websocket.DefaultDialer.Dial(u, authHeader(t, rider))
 	if err != nil {
 		t.Fatalf("dial %s: %v", u, err)
 	}
@@ -35,7 +79,7 @@ func dialRide(t *testing.T, srv *httptest.Server, code, rider string) *websocket
 // asynchronously once its connection is closed) must not undo that replacement.
 func TestRejoinEvictsGhostNotReplacement(t *testing.T) {
 	h := newHub(nil)
-	srv := httptest.NewServer(http.HandlerFunc(h.ServeWS))
+	srv := newAuthedServer(h)
 	defer srv.Close()
 
 	code := h.CreateRide()
@@ -108,7 +152,7 @@ func TestRejoinEvictsGhostNotReplacement(t *testing.T) {
 // connection's last known position rather than starting blank until their next GPS fix.
 func TestReconnectCarriesOverLastFix(t *testing.T) {
 	h := newHub(nil)
-	srv := httptest.NewServer(http.HandlerFunc(h.ServeWS))
+	srv := newAuthedServer(h)
 	defer srv.Close()
 
 	code := h.CreateRide()
@@ -147,11 +191,11 @@ func TestReconnectCarriesOverLastFix(t *testing.T) {
 
 func TestServeWSUnknownCodeReturns404(t *testing.T) {
 	h := newHub(nil)
-	srv := httptest.NewServer(http.HandlerFunc(h.ServeWS))
+	srv := newAuthedServer(h)
 	defer srv.Close()
 
-	u := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ride=NOTMINTED&rider=someone12"
-	_, resp, err := websocket.DefaultDialer.Dial(u, nil)
+	u := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ride=NOTMINTED"
+	_, resp, err := websocket.DefaultDialer.Dial(u, authHeader(t, "someone12"))
 	if err == nil {
 		t.Fatal("expected the dial to fail for an unminted ride code")
 	}
@@ -166,7 +210,7 @@ func TestServeWSUnknownCodeReturns404(t *testing.T) {
 
 func TestServeWSMintedCodeUpgradesAndWelcomes(t *testing.T) {
 	h := newHub(nil)
-	srv := httptest.NewServer(http.HandlerFunc(h.ServeWS))
+	srv := newAuthedServer(h)
 	defer srv.Close()
 
 	code := h.CreateRide()
@@ -174,8 +218,8 @@ func TestServeWSMintedCodeUpgradesAndWelcomes(t *testing.T) {
 		t.Fatal("CreateRide returned empty code")
 	}
 
-	u := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ride=" + code + "&rider=minted001"
-	conn, resp, err := websocket.DefaultDialer.Dial(u, nil)
+	u := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ride=" + code
+	conn, resp, err := websocket.DefaultDialer.Dial(u, authHeader(t, "minted001"))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -346,7 +390,7 @@ func TestCreateRideCodesAreDistinct(t *testing.T) {
 // write path, and room GC all racing against each other.
 func TestConcurrentJoinSendDisconnect(t *testing.T) {
 	h := newHub(nil)
-	srv := httptest.NewServer(http.HandlerFunc(h.ServeWS))
+	srv := newAuthedServer(h)
 	defer srv.Close()
 
 	code := h.CreateRide()
@@ -378,8 +422,8 @@ func TestConcurrentJoinSendDisconnect(t *testing.T) {
 		go func(i int) {
 			defer riders.Done()
 			id := fmt.Sprintf("concurrent%02d", i)
-			u := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ride=" + code + "&rider=" + id
-			conn, _, err := websocket.DefaultDialer.Dial(u, nil)
+			u := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ride=" + code
+			conn, _, err := websocket.DefaultDialer.Dial(u, authHeader(t, id))
 			if err != nil {
 				t.Errorf("dial: %v", err)
 				return

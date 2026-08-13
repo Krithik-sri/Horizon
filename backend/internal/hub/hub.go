@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/krithik/horizon/backend/internal/auth"
 )
 
 const (
@@ -193,13 +195,15 @@ func (h *Hub) ServeWS(w http.ResponseWriter, req *http.Request) {
 		name = "rider"
 	}
 
-	// Optional stable rider id, kept by the client across reconnects (mobile networks
-	// drop — CLAUDE.md). Presenting the same id lets the room replace the stale
-	// connection instead of seating a duplicate "ghost" rider. Absent/invalid → minted.
-	id := req.URL.Query().Get("rider")
-	if !validRiderID(id) {
-		id = genID()
-	}
+	// The rider's seat key is the verified JWT subject, not a client-asserted
+	// ?rider= — auth.Require has already rejected this request if it didn't carry a
+	// valid Supabase token, so Subject is always non-empty by the time ServeWS runs.
+	// It is stable across reconnects (mobile networks drop — CLAUDE.md) because a
+	// rider's sub does not change between connections, which is what lets the room
+	// replace the stale connection instead of seating a duplicate "ghost" rider — and,
+	// unlike the old client-chosen id, it cannot be spoofed to claim someone else's
+	// seat (docs/ADR/ADR-017.md Decision §6).
+	id := auth.Subject(req.Context())
 
 	conn, err := h.upgrader.Upgrade(w, req, nil)
 	if err != nil {
@@ -299,15 +303,20 @@ func (h *Hub) remove(c *Client) {
 // Ambiguity-free alphabet (no O/0, I/1) for human-shareable codes.
 const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
-// genCode and genID use crypto/rand rather than math/rand: these ids double as
-// unguessable tokens (there is no auth on /ws — a leaked code or rider id is all it
-// takes to sit in on someone's ride), so they need to not be predictable.
+// genCode uses crypto/rand rather than math/rand: a ride code is an unguessable token
+// in its own right, deliberately. auth.Require (docs/ADR/ADR-017.md) verifies *who* is
+// asking, but a ride code is meant to be shared with a convoy, not tied to any one
+// identity — so it still needs to not be predictable, the same way it always did,
+// rather than relying on auth to cover it. genID, the equivalent generator for a
+// client-chosen rider id, is gone: the rider id is now the verified JWT subject
+// (docs/ADR/ADR-017.md Decision §6), and there is no client-supplied value left to
+// validate or fall back from.
 //
-// Both alphabets divide 256 evenly (32 and 16), so taking a random byte mod
-// len(alphabet) is uniform with no bias and no rejection sampling needed. Since Go
-// 1.24, crypto/rand.Read no longer returns an error in practice (it blocks or panics
-// instead of failing), so its error return is ignored here rather than inventing a
-// dead error path.
+// The alphabet divides 256 evenly (32), so taking a random byte mod len(codeAlphabet)
+// is uniform with no bias and no rejection sampling needed. Since Go 1.24,
+// crypto/rand.Read no longer returns an error in practice (it blocks or panics instead
+// of failing), so its error return is ignored here rather than inventing a dead error
+// path.
 func genCode() string {
 	b := make([]byte, 6)
 	rand.Read(b)
@@ -315,31 +324,4 @@ func genCode() string {
 		b[i] = codeAlphabet[int(b[i])%len(codeAlphabet)]
 	}
 	return string(b)
-}
-
-func genID() string {
-	const hex = "0123456789abcdef"
-	b := make([]byte, 8)
-	rand.Read(b)
-	for i := range b {
-		b[i] = hex[int(b[i])%16]
-	}
-	return string(b)
-}
-
-// validRiderID accepts client-supplied ids shaped like crypto.randomUUID() output:
-// 8–64 chars of [A-Za-z0-9_-]. Anything else falls back to a server-minted id.
-func validRiderID(s string) bool {
-	if len(s) < 8 || len(s) > 64 {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_':
-		default:
-			return false
-		}
-	}
-	return true
 }

@@ -18,9 +18,12 @@ const healthPath = "/healthz"
 //
 // # What is deliberately not logged
 //
-// The query string. /ws carries ?name= and ?rider= — a rider's display name and their
-// stable identity across reconnects. r.URL.Path is logged; r.URL.RawQuery and
-// r.RequestURI are not, and neither is any request body.
+// The query string. /ws carries ?name= — a rider's display name. r.URL.Path is logged;
+// r.URL.RawQuery and r.RequestURI are not, and neither is any request body.
+//
+// Headers are not logged either, which is what keeps the Authorization bearer token out
+// of the log (ADR-017). Identity used to ride in ?rider=; since ADR-017 it is the JWT's
+// `sub` claim, derived server-side, so the query string no longer carries it at all.
 //
 // Coordinates never appear here at all: this middleware sees the WebSocket upgrade, not
 // the loc frames that flow over it afterwards (docs/SYSTEM_DESIGN.md — location is
