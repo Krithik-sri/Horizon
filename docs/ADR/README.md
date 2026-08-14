@@ -62,6 +62,10 @@ its own decision" — [012](./ADR-012.md) is that decision. The cell above is le
 originally written, per the append-only rule; it is now only partly current, and this note is the
 correction, not an edit to 011's row.
 
+**Note on 017's ES256 fork:** ADR-017 §8 named the ES256-via-JWKS path as a fork to take if the
+Supabase project uses asymmetric keys. That fork was taken; the implementation lives in
+`backend/internal/auth/auth.go` and the server now requires `SUPABASE_URL` (not `SUPABASE_JWT_SECRET`).
+
 ## Retired task scheme
 
 `cde311f` ("repo overhaul") deleted `docs/ROADMAP.md` and `docs/MASTER_TASKS.md`, which defined the

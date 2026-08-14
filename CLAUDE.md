@@ -75,7 +75,7 @@ ladder, silence budget, typography voices, colour).
 | **Never** | touches Postgres — no DB driver in `go.mod` | handles a live position stream |
 
 **Identity flows one way.** Supabase Auth is the *only* issuer. The Go server **verifies** Supabase
-JWTs (HS256, `SUPABASE_JWT_SECRET`) — it never mints identity, never has a user table, never
+JWTs (ES256 via the project's JWKS, `SUPABASE_URL`) — it never mints identity, never has a user table, never
 invents a session. Full rationale: `docs/ADR/ADR-008.md`.
 
 - The app sends `Authorization: Bearer <supabase-jwt>` on the WS upgrade. Native RN `WebSocket`
@@ -110,8 +110,7 @@ location behind an Android foreground service. The Go server verifies Supabase J
 proxies ORS for routing and geocoding, mints LiveKit tokens, and runs the hardened hub
 (`docs/ADR/ADR-010.md`). Nothing is stubbed any more.
 
-**Before any of it runs** you need a Supabase project with the legacy **HS256** JWT secret (not the
-now-default asymmetric keys) and anonymous sign-ins enabled, plus `SUPABASE_JWT_SECRET` in
+**Before any of it runs** you need a Supabase project with the project's signing keys (JWKS) and anonymous sign-ins enabled, plus `SUPABASE_URL` in
 `backend/.env` — the server refuses to boot without it, deliberately (`docs/ADR/ADR-017.md` §7).
 Voice and background location both need a dev-client rebuild.
 

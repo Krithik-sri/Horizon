@@ -92,16 +92,15 @@ this is the order the pieces go in.
 1. **Get an OpenRouteService key.** Free, email signup, no card — routing and place search both run
    through it.
 2. **Create a Supabase project.** Free, email signup, no card. Two settings are not optional and
-   both are easier to get right now than to diagnose later: use the **legacy HS256 JWT secret**
-   rather than the asymmetric signing keys new projects now default to (`docs/ADR/ADR-017.md` §8 —
-   with ES256, every token silently fails verification), and **enable anonymous sign-ins** under
+   both are easier to get right now than to diagnose later: use the default **ES256 signing keys**
+   (the project's JWKS), and **enable anonymous sign-ins** under
    Auth → Sign In / Providers, which are off by default (`docs/ADR/ADR-016.md`). Then apply
    `supabase/migrations/`. Riders never see a sign-up screen; this is invisible to them.
 3. **Run the backend and put a tunnel in front of it.** `go run .`, then
    `cloudflared tunnel --url http://localhost:8080` — no ports opened, no platform account, TLS and
    `wss://` for free (`docs/SETUP_BACKEND.md`). Use a **named** tunnel if you want a URL that
    survives a restart; step 5 explains why that matters more than it sounds. The server **will
-   refuse to start without `SUPABASE_JWT_SECRET`**, on purpose: an unset auth secret must never
+   refuse to start without `SUPABASE_URL`**, on purpose: an unset auth URL must never
    quietly mean "everything is open" (`docs/ADR/ADR-017.md` §7).
 4. **Point the app at it.** Edit `BASE_URL` in [`mobile/src/core/config.ts`](./mobile/src/core/config.ts)
    — your LAN IP for a tabletop test, the tunnel's `https://` URL for a real one. Everything else

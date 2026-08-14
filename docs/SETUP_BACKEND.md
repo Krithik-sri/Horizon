@@ -322,7 +322,6 @@ ORS_API_KEY=
 # Supabase. The Go server verifies tokens Supabase issues — it never mints identity and
 # never talks to Postgres (docs/ADR/ADR-008.md). Server-side only, never in the app.
 SUPABASE_URL=
-SUPABASE_JWT_SECRET=
 ```
 
 ### Copy it to `.env` — that works
@@ -337,7 +336,7 @@ go run .
 `os.Getenv`. You'll see it confirmed in the first log line:
 
 ```json
-{"level":"INFO","msg":"loaded .env","vars":["SUPABASE_JWT_SECRET","SUPABASE_URL","ORS_API_KEY"]}
+{"level":"INFO","msg":"loaded .env","vars":["SUPABASE_URL","ORS_API_KEY"]}
 ```
 
 **Variable names only, never values** — these are secrets, and the log is the one place they must
@@ -631,7 +630,7 @@ not. The alternative is accepting that the URL changes and rebuilding before eac
 - **`ALLOWED_ORIGINS` can stay unset.** There is no browser client (`docs/ADR/ADR-007.md`), so
   CORS — a browser-enforced mechanism — isn't the security boundary here. The "every origin is
   allowed" warning at startup is the expected state, not a problem to chase.
-- **`SUPABASE_JWT_SECRET` must be set or the process exits** (`docs/ADR/ADR-017.md` §7). Set it the
+- **`SUPABASE_URL` must be set or the process exits** (`docs/ADR/ADR-017.md` §7). Set it the
   same way as `ORS_API_KEY` — a real environment variable, never a `.env` baked into an image.
 - **`PORT` defaults to 8080** and `main.go` reads `os.Getenv("PORT")` if a host injects one. Running
   it yourself, leave it alone.
@@ -645,7 +644,7 @@ not. The alternative is accepting that the URL changes and rebuilding before eac
 build compiling a static binary into `gcr.io/distroless/static-debian12:nonroot` (no shell, no
 package manager, uid 65532). Any container host that reads a Dockerfile will take it; the app is a
 single stateless binary with in-memory rooms (`docs/ADR/ADR-010.md`), so nothing about it needs a
-specific provider. Set `ORS_API_KEY`, `SUPABASE_JWT_SECRET`, `SUPABASE_URL` and the `LIVEKIT_*` vars
+specific provider. Set `ORS_API_KEY`, `SUPABASE_URL` and the `LIVEKIT_*` vars
 as environment variables there, and let the host inject `PORT`.
 
 ### Security reality check

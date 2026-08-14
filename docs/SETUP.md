@@ -86,9 +86,9 @@ Still needed:
   ```
 - **A running backend** — see [`docs/SETUP_BACKEND.md`](./SETUP_BACKEND.md). It needs
   **OpenRouteService** (free key, no card, `driving-car` profile — ORS has no motorcycle profile),
-  a **Supabase** project with the legacy HS256 JWT secret and anonymous sign-ins enabled
+  a **Supabase** project with the default ES256 signing keys (JWKS) and anonymous sign-ins enabled
   ([`ADR-016`](./ADR/ADR-016.md), [`ADR-017`](./ADR/ADR-017.md) — the server refuses to boot
-  without `SUPABASE_JWT_SECRET`), and **LiveKit Cloud** for voice
+  without `SUPABASE_URL`), and **LiveKit Cloud** for voice
   ([`ADR-020`](./ADR/ADR-020.md)). All three are free with no card; every secret lives on the
   backend, never in this app.
 - **The map needs nothing.** OpenFreeMap tiles are keyless, no signup.

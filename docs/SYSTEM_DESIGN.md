@@ -91,7 +91,7 @@ Where does new code go? Answer with this table before writing anything ([`ADR-00
 | **Never** | touches Postgres — no DB driver in `go.mod` | handles a live position stream |
 
 **Identity flows one way.** Supabase Auth is the *only* issuer. The Go server **verifies**
-Supabase JWTs (HS256, `SUPABASE_JWT_SECRET`, via `github.com/golang-jwt/jwt/v5`) — it never
+Supabase JWTs (ES256 via the project's JWKS, `SUPABASE_URL`, via `github.com/golang-jwt/jwt/v5`) — it never
 mints identity, never has a user table. The app sends `Authorization: Bearer <supabase-jwt>` on
 the WS upgrade and on every HTTP route — never in the query string. Note the reason usually given
 for that rule is wrong: `internal/httpx/logging.go` logs `r.URL.Path` only, never `RawQuery`, so
@@ -230,7 +230,7 @@ How to close that gap, one verifiable feature milestone at a time: [`docs/FINISH
   is never persisted by the Go server.
 - Durable data in Supabase (journal, photos, stats) is opt-in and rider-owned — enforce that
   with Row-Level Security, not application logic.
-- Keep the **LiveKit secret**, **ORS key**, and **`SUPABASE_JWT_SECRET`** server-side only, via
+- Keep the **LiveKit secret**, **ORS key**, and **`SUPABASE_URL`** server-side only, via
   env vars — never in the app, never committed. Verify JWTs with
   `github.com/golang-jwt/jwt/v5`, never hand-rolled.
 - Never put a token in a query string. Use `wss://` (TLS) in production.
