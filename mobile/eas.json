@@ -11,7 +11,7 @@
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_HORIZON_API_URL": "https://rod-rankings-historical-investors.trycloudflare.com"
+        "EXPO_PUBLIC_HORIZON_API_URL": "https://horizon-production-a186.up.railway.app"
       }
     },
     "production": {
