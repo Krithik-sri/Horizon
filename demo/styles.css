@@ -1,0 +1,315 @@
+/* ==========================================================================
+   Design Tokens — transcribed from mobile/src/design/tokens.ts
+   ========================================================================== */
+
+:root {
+  /* Colors - surfaces */
+  --surface-void: #000000;
+  --surface-base: #0A0A0B;
+  --surface-raised: #141416;
+  --surface-overlay: #1C1C1F;
+  --surface-hairline: #2A2A2E;
+
+  /* Colors - ink */
+  --ink-primary: #F5F4F2;
+  --ink-secondary: #A3A29E;
+  --ink-tertiary: #6B6A67;
+  --ink-disabled: #3F3F42;
+
+  /* Colors - amber */
+  --amber-core: #E8A33D;
+  --amber-dim: #8A6224;
+  --amber-wash: rgba(232, 163, 61, 0.10);
+
+  /* Colors - signal */
+  --signal-caution: #E8A33D;
+  --signal-critical: #D4544A;
+  --signal-good: #6E9E7C;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --space-9: 96px;
+
+  /* Radius */
+  --radius-input: 4px;
+  --radius-card: 10px;
+  --radius-sheet: 18px;
+  --radius-full: 9999px;
+
+  /* Typography - font stacks */
+  --font-operational: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-reflective: 'Newsreader', 'Source Serif 4', Georgia, serif;
+}
+
+/* ==========================================================================
+   Base
+   ========================================================================== */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-operational);
+  background: var(--surface-base);
+  color: var(--ink-primary);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ==========================================================================
+   Phone Frame
+   ========================================================================== */
+
+.phone-frame {
+  width: 375px;
+  height: 812px;
+  border: 1px solid var(--surface-hairline);
+  position: relative;
+  overflow: hidden;
+}
+
+.screen-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+/* Responsive: fill screen on mobile viewports */
+@media (max-width: 400px) {
+  .phone-frame {
+    width: 100%;
+    height: 100vh;
+    border: none;
+  }
+}
+
+/* ==========================================================================
+   Screen Switching
+   ========================================================================== */
+
+.screen {
+  display: none;
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.screen.active {
+  display: block;
+}
+
+/* ==========================================================================
+   Typography Utility Classes
+   ========================================================================== */
+
+/* Motion scale */
+.type-motion-primary {
+  font-family: var(--font-operational);
+  font-size: 64px;
+  line-height: 64px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.type-motion-secondary {
+  font-family: var(--font-operational);
+  font-size: 32px;
+  line-height: 36px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.type-motion-label {
+  font-family: var(--font-operational);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+}
+
+/* Departure scale */
+.type-departure-display {
+  font-family: var(--font-operational);
+  font-size: 40px;
+  line-height: 44px;
+  font-weight: 600;
+}
+
+.type-departure-title {
+  font-family: var(--font-operational);
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 600;
+}
+
+.type-departure-body {
+  font-family: var(--font-operational);
+  font-size: 17px;
+  line-height: 24px;
+  font-weight: 400;
+}
+
+.type-departure-label {
+  font-family: var(--font-operational);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.78px;
+}
+
+/* Reflective scale (Return only) */
+.type-reflective-title {
+  font-family: var(--font-reflective);
+  font-size: 32px;
+  line-height: 40px;
+  font-weight: 400;
+}
+
+.type-reflective-body {
+  font-family: var(--font-reflective);
+  font-size: 19px;
+  line-height: 30px;
+  font-weight: 400;
+}
+
+.type-reflective-caption {
+  font-family: var(--font-operational);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+}
+
+/* Tabular nums utility */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   Common Elements
+   ========================================================================== */
+
+/* Buttons */
+.btn-primary {
+  background: var(--amber-core);
+  color: var(--surface-void);
+  border: none;
+  border-radius: var(--radius-card);
+  padding: var(--space-4);
+  min-height: 44px;
+  font-family: var(--font-operational);
+  font-size: 17px;
+  font-weight: 400;
+  cursor: pointer;
+  width: 100%;
+}
+
+.btn-primary:disabled {
+  background: var(--ink-disabled);
+  color: var(--ink-secondary);
+  cursor: not-allowed;
+}
+
+/* Inputs */
+.input-field {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--surface-hairline);
+  color: var(--ink-primary);
+  font-family: var(--font-operational);
+  font-size: 17px;
+  line-height: 24px;
+  padding: var(--space-2) 0;
+  width: 100%;
+  min-height: 44px;
+}
+
+.input-field::placeholder {
+  color: var(--ink-tertiary);
+}
+
+/* Back links (mock-only) */
+.back-link {
+  font-family: var(--font-operational);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.78px;
+  color: var(--ink-secondary);
+  text-decoration: none;
+  cursor: pointer;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.back-link:hover {
+  color: var(--ink-primary);
+}
+
+/* Spoken directions toggle (real app: platform Switch, app/index.tsx —
+   amber track when on, ink.disabled when off, ink.primary thumb;
+   radius and duration from tokens) */
+.switch-track {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--amber-core);
+  border-radius: var(--radius-full);
+  transition: 220ms; /* motion.duration.base — the Departure animation cap */
+}
+
+.switch-thumb {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  top: 4px;
+  left: 4px;
+  border-radius: var(--radius-full);
+  background-color: var(--ink-primary);
+  transition: 220ms;
+}
+
+input:checked + .switch-track .switch-thumb {
+  left: 26px;
+}
+
+input:not(:checked) + .switch-track {
+  background-color: var(--ink-disabled);
+}
+
+/* ==========================================================================
+   Departure — two independent state regions, persistent layout
+   ========================================================================== */
+
+.start-idle,
+.start-confirm,
+.join-idle,
+.join-connected {
+  display: none;
+}
+
+#screen-departure[data-start-state="idle"] .start-idle { display: block; }
+#screen-departure[data-start-state="confirm"] .start-confirm { display: block; }
+
+#screen-departure[data-join-state="idle"] .join-idle { display: block; }
+#screen-departure[data-join-state="connected"] .join-connected { display: block; }

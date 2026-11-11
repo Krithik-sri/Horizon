@@ -1,0 +1,203 @@
+/* ---------- waveform ---------- */
+.wave {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.wave i {
+  flex: 1;
+  min-width: 2px;
+  max-width: 4px;
+  height: 18%;
+  border-radius: 4px;
+  background: linear-gradient(180deg, var(--wc1), var(--wc2) 50%, var(--wc3));
+  opacity: 0.4;
+  transition:
+    height 300ms ease,
+    opacity 300ms ease;
+}
+.wave.on i {
+  opacity: 1;
+  animation: wave-bar ease-in-out infinite alternate;
+}
+@keyframes wave-bar {
+  0% {
+    height: 15%;
+  }
+  50% {
+    height: 85%;
+  }
+  100% {
+    height: 35%;
+  }
+}
+
+/* ---------- hold button ---------- */
+.hold {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.16), rgba(20, 14, 60, 0.75));
+  backdrop-filter: blur(18px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 12px 36px -10px rgba(255, 122, 89, 0.6);
+  touch-action: none;
+  user-select: none;
+}
+.hold-ring {
+  position: absolute;
+  inset: 0;
+  transform: rotate(-90deg);
+}
+.hold-track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.12);
+  stroke-width: 4;
+}
+.hold-fill {
+  fill: none;
+  stroke-width: 5;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 6px rgba(255, 122, 89, 0.9));
+}
+.hold-label {
+  position: relative;
+  max-width: 70%;
+  text-align: center;
+  font: 600 12px/1.2 var(--font-display);
+  color: var(--ink-1);
+}
+.hold.holding {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 0 50px rgba(255, 79, 216, 0.7);
+}
+
+/* ---------- code cells ---------- */
+.cells {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  cursor: text;
+}
+.cells.ro {
+  cursor: default;
+}
+.cells-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  border: 0;
+  caret-color: transparent;
+  z-index: 2;
+}
+.cell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 0.82;
+  border-radius: 14px;
+  background: rgba(8, 6, 32, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 24px;
+  color: var(--ink-1);
+  transition:
+    box-shadow var(--t-med) var(--ease-out),
+    background var(--t-med) var(--ease-out);
+}
+.cells-lg .cell {
+  font-size: 32px;
+  border-radius: 16px;
+}
+.cell.filled {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 26%, transparent), color-mix(in srgb, var(--accent-2) 10%, transparent));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent),
+    0 0 18px -4px var(--accent-glow);
+}
+.cells.ro .cell.filled span {
+  background: var(--grad-accent);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.cell.cursor {
+  box-shadow:
+    inset 0 0 0 1.5px rgba(139, 238, 255, 0.9),
+    0 0 20px rgba(34, 211, 238, 0.45);
+}
+.cell.cursor::after {
+  content: '';
+  position: absolute;
+  bottom: 22%;
+  width: 40%;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--cyan);
+  animation: chip-blink 1s steps(2) infinite;
+}
+.cells.err .cell {
+  box-shadow: inset 0 0 0 1px rgba(255, 92, 138, 0.7);
+}
+
+/* ---------- toasts ---------- */
+.toasts {
+  position: absolute;
+  top: 58px;
+  left: 0;
+  right: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 18px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-1);
+  max-width: 340px;
+}
+.toast-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tone-dot-violet {
+  background: var(--violet);
+  box-shadow: 0 0 10px var(--violet);
+}
+.tone-dot-cyan {
+  background: var(--cyan);
+  box-shadow: 0 0 10px var(--cyan);
+}
+.tone-dot-magenta {
+  background: var(--magenta);
+  box-shadow: 0 0 10px var(--magenta);
+}
+.tone-dot-lime {
+  background: var(--lime);
+  box-shadow: 0 0 10px var(--lime);
+}
+.tone-dot-coral {
+  background: var(--coral);
+  box-shadow: 0 0 10px var(--coral);
+}
+.tone-dot-rose {
+  background: var(--rose);
+  box-shadow: 0 0 10px var(--rose);
+}

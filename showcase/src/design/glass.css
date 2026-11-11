@@ -1,0 +1,210 @@
+/* Glass primitives. Compose with tone modifiers: .tone-violet / -cyan / -magenta / -lime / -coral */
+
+.glass {
+  position: relative;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.03) 100%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  border-radius: var(--r-md);
+  box-shadow:
+    var(--glass-highlight),
+    0 10px 40px -12px rgba(0, 0, 0, 0.7);
+  isolation: isolate;
+}
+
+/* 1px gradient hairline drawn with a masked pseudo-element so it can be a gradient */
+.glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    150deg,
+    rgba(255, 255, 255, 0.34) 0%,
+    rgba(255, 255, 255, 0.06) 40%,
+    rgba(255, 255, 255, 0.04) 60%,
+    rgba(255, 255, 255, 0.22) 100%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.glass-deep {
+  background: linear-gradient(160deg, rgba(22, 26, 40, 0.66) 0%, rgba(8, 10, 18, 0.76) 100%);
+}
+
+.glass-strong {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.05) 100%);
+}
+
+/* coloured inner wash + outer glow */
+.tone-violet {
+  box-shadow:
+    var(--glass-highlight),
+    inset 0 0 40px rgba(124, 92, 255, 0.16),
+    0 12px 40px -14px rgba(124, 92, 255, 0.55);
+}
+.tone-violet::before {
+  background: linear-gradient(150deg, rgba(165, 148, 255, 0.7), rgba(124, 92, 255, 0.08) 45%, rgba(255, 79, 216, 0.4));
+}
+.tone-cyan {
+  box-shadow:
+    var(--glass-highlight),
+    inset 0 0 40px rgba(34, 211, 238, 0.14),
+    0 12px 40px -14px rgba(34, 211, 238, 0.5);
+}
+.tone-cyan::before {
+  background: linear-gradient(150deg, rgba(139, 238, 255, 0.75), rgba(34, 211, 238, 0.08) 45%, rgba(124, 92, 255, 0.4));
+}
+.tone-magenta {
+  box-shadow:
+    var(--glass-highlight),
+    inset 0 0 40px rgba(255, 79, 216, 0.14),
+    0 12px 40px -14px rgba(255, 79, 216, 0.5);
+}
+.tone-magenta::before {
+  background: linear-gradient(150deg, rgba(255, 156, 234, 0.75), rgba(255, 79, 216, 0.08) 45%, rgba(255, 122, 89, 0.45));
+}
+.tone-lime {
+  box-shadow:
+    var(--glass-highlight),
+    inset 0 0 40px rgba(184, 255, 92, 0.1),
+    0 12px 40px -14px rgba(184, 255, 92, 0.4);
+}
+.tone-lime::before {
+  background: linear-gradient(150deg, rgba(184, 255, 92, 0.7), rgba(184, 255, 92, 0.06) 45%, rgba(34, 211, 238, 0.4));
+}
+.tone-coral {
+  box-shadow:
+    var(--glass-highlight),
+    inset 0 0 40px rgba(255, 122, 89, 0.14),
+    0 12px 40px -14px rgba(255, 122, 89, 0.5);
+}
+.tone-coral::before {
+  background: linear-gradient(150deg, rgba(255, 209, 102, 0.75), rgba(255, 122, 89, 0.08) 45%, rgba(255, 79, 216, 0.45));
+}
+.tone-rose {
+  box-shadow:
+    var(--glass-highlight),
+    inset 0 0 40px rgba(255, 92, 138, 0.14),
+    0 12px 40px -14px rgba(255, 92, 138, 0.5);
+}
+.tone-rose::before {
+  background: linear-gradient(150deg, rgba(255, 156, 180, 0.75), rgba(255, 92, 138, 0.08) 45%, rgba(255, 79, 216, 0.4));
+}
+
+/* dot-grid texture, usable on any surface */
+.dots {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.14) 1px, transparent 1.2px);
+  background-size: 16px 16px;
+}
+.dots-fade {
+  -webkit-mask-image: radial-gradient(ellipse at 50% 30%, #000 0%, transparent 75%);
+  mask-image: radial-gradient(ellipse at 50% 30%, #000 0%, transparent 75%);
+}
+
+.shimmer {
+  background: linear-gradient(
+    100deg,
+    rgba(255, 255, 255, 0.04) 20%,
+    rgba(255, 255, 255, 0.16) 40%,
+    rgba(255, 255, 255, 0.04) 60%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+/* input field */
+.field {
+  width: 100%;
+  height: 52px;
+  padding: 0 16px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--glass-line);
+  background: rgba(6, 8, 14, 0.5);
+  color: var(--ink-1);
+  font-size: 16px;
+  outline: none;
+  transition:
+    border-color var(--t-med) var(--ease-out),
+    box-shadow var(--t-med) var(--ease-out),
+    background var(--t-med) var(--ease-out);
+}
+.field::placeholder {
+  color: var(--ink-4);
+}
+.field:focus {
+  border-color: color-mix(in srgb, var(--accent) 75%, white);
+  background: rgba(6, 8, 14, 0.7);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent),
+    0 0 24px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* glass that stays legible over a busy map */
+.glass-map {
+  background: rgba(7, 9, 16, 0.7) !important;
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+.glass-map::before {
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.12)) !important;
+}
+
+/* plain hairline variant — for every card that is NOT the screen's hero */
+.glass-quiet {
+  box-shadow: 0 10px 30px -16px rgba(0, 0, 0, 0.6);
+}
+.glass-quiet::before {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* holographic animated edge — use on ONE hero surface per screen */
+@property --holo-a {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+.holo::before {
+  padding: 1.5px !important;
+  background: conic-gradient(from var(--holo-a), var(--cyan), var(--violet), var(--magenta), var(--sun), var(--lime), var(--cyan)) !important;
+  animation: holo-spin 8s linear infinite;
+}
+.holo {
+  box-shadow:
+    var(--glass-highlight),
+    0 0 40px -10px var(--accent-glow),
+    0 20px 50px -20px rgba(0, 0, 0, 0.8);
+}
+@keyframes holo-spin {
+  to {
+    --holo-a: 360deg;
+  }
+}
+
+/* halftone: the signature dot motif — fine dots dissolving towards an edge */
+.halftone {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.22) 0.9px, transparent 1.1px);
+  background-size: 6px 6px;
+  -webkit-mask-image: linear-gradient(160deg, #000 0%, transparent 70%);
+  mask-image: linear-gradient(160deg, #000 0%, transparent 70%);
+}
+.halftone-accent {
+  background-image: radial-gradient(color-mix(in srgb, var(--accent) 55%, transparent) 0.9px, transparent 1.2px);
+  background-size: 6px 6px;
+  -webkit-mask-image: linear-gradient(160deg, #000 0%, transparent 70%);
+  mask-image: linear-gradient(160deg, #000 0%, transparent 70%);
+}
+
+.grad-text-accent {
+  background: var(--grad-accent);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}

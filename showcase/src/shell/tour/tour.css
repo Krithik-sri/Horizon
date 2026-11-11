@@ -1,0 +1,343 @@
+/* ---------- Tour rail (shell register: violet) ---------- */
+.tour {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px 20px 16px;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: linear-gradient(170deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.015) 100%);
+  box-shadow: 0 20px 60px -30px rgba(0, 0, 0, 0.7);
+}
+.tour.glass::before {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.02) 40%, rgba(255, 255, 255, 0.02) 70%, rgba(124, 92, 255, 0.18));
+}
+.tour > * {
+  position: relative;
+  z-index: 2;
+}
+.tour-halftone {
+  position: absolute !important;
+  inset: 0 0 auto 0;
+  height: 180px;
+  z-index: 0 !important;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* header */
+.tour-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tour-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.tour-logo {
+  flex: none;
+  filter: drop-shadow(0 0 12px var(--accent-glow));
+}
+.tour-title {
+  margin: 0;
+  font: 600 22px/1 var(--font-display);
+  letter-spacing: -0.03em;
+  color: var(--ink-1);
+}
+.tour-chip {
+  margin-left: auto;
+  padding: 5px 8px;
+  border-radius: 999px;
+  font: 500 9.5px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--violet-soft);
+  background: rgba(124, 92, 255, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(165, 148, 255, 0.32);
+  white-space: nowrap;
+}
+.tour-pitch {
+  margin: 0;
+  font: 400 13.5px/1.45 var(--font-ui);
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+
+/* auto-play */
+.tour-play {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 12px;
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.035);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  transition: box-shadow var(--t-med) var(--ease-out), background var(--t-med) var(--ease-out);
+}
+.tour-play.is-running {
+  background: rgba(124, 92, 255, 0.07);
+  box-shadow:
+    inset 0 0 0 1px rgba(165, 148, 255, 0.3),
+    0 0 30px -12px var(--accent-glow);
+}
+.tour-status {
+  overflow: hidden;
+}
+.tour-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 12px;
+  margin-bottom: 8px;
+}
+.tour-mono {
+  font: 500 10.5px/1 var(--font-mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.tour-live {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+  animation: tour-blink 1.4s ease-in-out infinite;
+}
+@keyframes tour-blink {
+  50% {
+    opacity: 0.3;
+  }
+}
+.tour-caption {
+  margin: 10px 0 0;
+  min-height: 36px;
+  font: 400 13px/1.4 var(--font-ui);
+  color: var(--ink-1);
+}
+
+/* timeline */
+.tour-label {
+  font: 500 10.5px/1 var(--font-mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: -6px;
+}
+.tour-timeline {
+  flex: 1;
+  min-height: 0;
+  margin: 0 -8px;
+  padding: 2px 8px 8px;
+  list-style: none;
+  overflow-y: auto;
+  scroll-padding-top: 24px;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 10px, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(180deg, transparent 0, #000 10px, #000 calc(100% - 18px), transparent);
+}
+.tour-ch {
+  position: relative;
+  --ch: var(--lime);
+}
+.tour-ch.reg-motion {
+  --ch: var(--cyan);
+}
+.tour-ch.reg-return {
+  --ch: var(--coral);
+}
+/* dotted spine between nodes */
+.tour-ch::before {
+  content: '';
+  position: absolute;
+  left: 21px;
+  top: 38px;
+  bottom: -6px;
+  width: 2px;
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.28) 1px, transparent 1.3px);
+  background-size: 2px 7px;
+  background-repeat: repeat-y;
+}
+.tour-ch:last-child::before {
+  display: none;
+}
+.tour-ch-btn {
+  width: 100%;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 10px 12px 8px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  transition: background var(--t-med) var(--ease-out);
+  cursor: pointer;
+}
+.tour-ch-btn:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.tour-ch.is-active .tour-ch-btn {
+  background: linear-gradient(100deg, rgba(124, 92, 255, 0.14), rgba(124, 92, 255, 0.02) 80%);
+  box-shadow: inset 0 0 0 1px rgba(165, 148, 255, 0.18);
+}
+.tour-ch-btn:focus-visible {
+  outline: 2px solid var(--violet-soft);
+  outline-offset: 1px;
+}
+.tour-node {
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--night-2);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+.tour-node-num {
+  position: relative;
+  z-index: 1;
+  font: 600 11px/1 var(--font-mono);
+  color: var(--ink-3);
+}
+.tour-node-glow {
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  background: var(--grad-accent);
+  box-shadow:
+    0 0 0 4px rgba(124, 92, 255, 0.16),
+    0 0 22px var(--accent-glow);
+}
+.tour-node-glow::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1px solid rgba(165, 148, 255, 0.6);
+  animation: tour-ring 2.4s var(--ease-out) infinite;
+}
+@keyframes tour-ring {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+.tour-ch.is-active .tour-node-num {
+  color: #fff;
+}
+.tour-ch-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 3px;
+}
+.tour-ch-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.tour-ch-title {
+  font: 600 14px/1.1 var(--font-display);
+  letter-spacing: -0.02em;
+  color: var(--ink-2);
+}
+.tour-ch.is-active .tour-ch-title {
+  color: var(--ink-1);
+}
+.tour-ch-reg {
+  margin-left: auto;
+  font: 500 9px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--ch) 70%, transparent);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.tour-ch-reg::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ch);
+  opacity: 0.8;
+}
+.tour-ch-desc {
+  font: 400 12.5px/1.4 var(--font-ui);
+  color: var(--ink-3);
+}
+.tour-ch.is-active .tour-ch-desc {
+  color: var(--ink-2);
+}
+.tour-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+.tour-tag {
+  padding: 3px 6px;
+  border-radius: 6px;
+  font: 500 9.5px/1.1 var(--font-mono);
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.tour-ch.is-active .tour-tag {
+  color: var(--ink-2);
+  background: rgba(124, 92, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(165, 148, 255, 0.2);
+}
+
+/* footer */
+.tour-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+}
+.tour-keys,
+.tour-note {
+  font: 400 10.5px/1.4 var(--font-mono);
+  color: var(--ink-3);
+}
+.tour-note {
+  color: var(--ink-4);
+}
+.tour-keys kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  margin: 0 2px;
+  border-radius: 5px;
+  font: 600 10px/1 var(--font-mono);
+  color: var(--ink-2);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08), inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+/* inside the compact drawer: no keyboard there, and keep room for the close button */
+.drawer .tour-keys {
+  display: none;
+}
+.drawer .tour-chip {
+  margin-right: 36px;
+}
+.drawer .tour {
+  background: linear-gradient(170deg, rgba(22, 26, 40, 0.86), rgba(8, 10, 18, 0.92));
+}

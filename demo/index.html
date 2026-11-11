@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Horizon — Mock UI Demo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:wght@400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="phone-frame">
+    <div class="screen-container">
+
+      <!-- Screen: Departure (persistent layout + two independent state regions) -->
+      <div id="screen-departure" class="screen active" data-start-state="idle" data-join-state="idle" style="background: var(--surface-base); padding: var(--space-5); overflow-y: auto;">
+        <!-- Persistent chrome (always visible) -->
+        <h1 class="type-departure-display" style="color: var(--ink-primary);">Horizon</h1>
+        <p class="type-departure-body location-status" style="color: var(--signal-good); margin-top: var(--space-4);">Location ready.</p>
+
+        <label class="type-departure-label" style="color: var(--ink-secondary); margin-top: var(--space-6); display: block;">Your name</label>
+        <input type="text" class="input-field rider-name-input" placeholder="Name" style="margin-top: var(--space-2);">
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: var(--space-6); min-height: 44px;">
+          <span class="type-departure-body" style="color: var(--ink-primary);">Spoken directions</span>
+          <!-- Toggle: mirrors the real platform Switch (app/index.tsx) — amber track
+               when on, ink.disabled when off, ink.primary thumb; radius/transition from tokens -->
+          <label style="position: relative; display: inline-block; width: 50px; height: 28px;">
+            <input type="checkbox" class="voice-toggle" checked style="opacity: 0; width: 0; height: 0;">
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+          </label>
+        </div>
+
+        <!-- Start flow region title (persistent) -->
+        <h2 class="type-departure-title" style="color: var(--ink-primary); margin-top: var(--space-7);">Start a ride</h2>
+
+        <!-- Start flow: idle -->
+        <div class="start-idle">
+          <button class="btn-primary" style="margin-top: var(--space-4);" onclick="setStartState('confirm')">Start a ride</button>
+        </div>
+
+        <!-- Start flow: confirm -->
+        <div class="start-confirm">
+          <p class="type-departure-display tabular-nums ride-code-display" style="color: var(--ink-primary); margin-top: var(--space-4); text-align: center; letter-spacing: 8px;">H3K7M2</p>
+          <button class="btn-primary" style="margin-top: var(--space-4);" data-navigate="screen-planner">Plan the route</button>
+          <button class="btn-primary" style="margin-top: var(--space-4);" data-navigate="screen-motion">Start Riding</button>
+        </div>
+
+        <!-- Join flow region title (persistent) -->
+        <h2 class="type-departure-title" style="color: var(--ink-primary); margin-top: var(--space-7);">Join a ride</h2>
+
+        <!-- Join flow: idle -->
+        <div class="join-idle">
+          <input type="text" class="input-field ride-code-input" style="margin-top: var(--space-4); text-align: center; font-size: 40px; line-height: 44px; letter-spacing: 8px; font-variant-numeric: tabular-nums; text-transform: uppercase;" placeholder="CODE" maxlength="6">
+          <button class="btn-primary" style="margin-top: var(--space-4);" onclick="setJoinState('connected')">Join</button>
+        </div>
+
+        <!-- Join flow: connected -->
+        <div class="join-connected">
+          <p class="type-departure-display tabular-nums ride-code-display" style="color: var(--ink-primary); margin-top: var(--space-4); text-align: center; letter-spacing: 8px;">H3K7M2</p>
+          <button class="btn-primary" style="margin-top: var(--space-4);" data-navigate="screen-planner">Plan the route</button>
+          <button class="btn-primary" style="margin-top: var(--space-4);" data-navigate="screen-motion">Join Ride</button>
+        </div>
+
+        <!-- Past rides link (real app UI, mock wires it to screen switching instead of router.push('/return')) -->
+        <a href="#" class="back-link" style="margin-top: var(--space-7);" data-navigate="screen-return-list">Past rides</a>
+      </div>
+
+      <!-- Screen: Motion -->
+      <div id="screen-motion" class="screen" style="background: var(--surface-void);">
+        <!-- Map placeholder (SVG) -->
+        <svg class="motion-map" viewBox="0 0 375 812" preserveAspectRatio="xMidYMid slice" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 0;">
+          <rect width="375" height="812" fill="var(--surface-raised)"/>
+          <!-- Route line (stroke-width 4, matches RouteLine.tsx's line-width) -->
+          <path d="M 50 700 Q 150 500 200 400 T 320 100" stroke="var(--amber-core)" stroke-width="4" fill="none"/>
+          <!-- Destination ring at the route's end point (DestinationMarker reuse: 20px, hollow, ink.primary) -->
+          <circle cx="320" cy="100" r="10" stroke="var(--ink-primary)" stroke-width="2" fill="none"/>
+          <!-- Rider dots (16px diameter, r=8, binary state per ADR-009: own dot amber, others ink.primary) -->
+          <circle class="rider-dot" cx="255" cy="275" r="8" fill="var(--ink-primary)"/> <!-- Sam (ahead, nearing the destination) -->
+          <circle class="rider-dot" cx="200" cy="400" r="8" fill="var(--amber-core)"/> <!-- Alex (you) -->
+          <circle class="rider-dot" cx="100" cy="600" r="8" fill="var(--ink-primary)"/> <!-- Rio (behind) -->
+        </svg>
+
+        <!-- Ahead band -->
+        <div class="horizon-ahead" style="position: relative; z-index: 1; height: 34%; padding: var(--space-6);">
+          <!-- AheadCue card: width: fit-content (band is NOT flex, so align-self is no-op) -->
+          <div style="background: var(--surface-void); border-radius: var(--radius-card); padding: var(--space-4); width: fit-content;">
+            <div style="display: flex; align-items: center; gap: var(--space-3);">
+              <!-- Maneuver glyph (right-turn dart) -->
+              <svg width="28" height="28" viewBox="0 0 24 24">
+                <path d="M12 4 L20 20 L12 15.5 L4 20 Z" fill="var(--amber-core)" transform="rotate(90 12 12)"/>
+              </svg>
+              <div>
+                <p class="type-motion-secondary maneuver-text" style="color: var(--ink-primary);">420 m · Turn right onto NH 44</p>
+                <p class="type-motion-label street-text" style="color: var(--ink-secondary);">NH 44</p>
+                <p class="type-motion-label readout-text" style="color: var(--ink-secondary);">28 min · 14.2 km</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Now band -->
+        <div class="horizon-now" style="position: relative; z-index: 1; height: 24%; padding: var(--space-6); display: flex; align-items: center;">
+          <!-- SpeedReadout card: NO align-self — band's default justify-content: flex-start left-aligns, align-items: center vertically centers -->
+          <div style="background: var(--surface-void); border-radius: var(--radius-card); padding: var(--space-4); text-align: center;">
+            <p class="type-motion-primary speed-display" style="color: var(--ink-primary);">62</p>
+            <p class="type-motion-label" style="color: var(--ink-primary);">km/h</p>
+          </div>
+        </div>
+
+        <!-- Held band: EndRide pill at the TOP of the band, right-aligned (matches the real
+             app — EndRide.tsx's wrapper alignItems flex-end is horizontal-only; the band
+             View itself has no vertical justification) -->
+        <div class="horizon-held" style="position: relative; z-index: 1; height: 42%; padding: var(--space-6); display: flex; align-items: flex-start; justify-content: flex-end;">
+          <!-- mock-only: EndRide pill shown visible (real app gates on 5s stationary + 800ms long-press) -->
+          <button data-navigate="screen-return-detail" style="background: var(--surface-overlay); border-radius: var(--radius-full); padding: var(--space-4); border: none; min-height: 56px; cursor: pointer;">
+            <span class="type-motion-label" style="color: var(--ink-primary);">Hold to end ride</span>
+          </button>
+        </div>
+
+        <!-- Push-to-talk band (invisible, pointer-events: none so EndRide wins the touch) -->
+        <div class="ptt-band" style="position: absolute; bottom: 0; left: 0; right: 0; height: 42%; z-index: 2; pointer-events: none;">
+          <!-- Optional 2px amber hairline at bottom when talking -->
+        </div>
+      </div>
+
+      <!-- Screen: Planner -->
+      <div id="screen-planner" class="screen" style="background: var(--surface-base);">
+        <!-- Map area (top ~45%) -->
+        <div style="height: 45%; background: var(--surface-raised); position: relative;">
+          <svg viewBox="0 0 375 365" preserveAspectRatio="xMidYMid slice" style="width: 100%; height: 100%;">
+            <rect width="375" height="365" fill="var(--surface-raised)"/>
+            <path d="M 50 300 Q 150 200 200 150 T 320 50" stroke="var(--amber-core)" stroke-width="4" fill="none"/>
+            <circle cx="50" cy="300" r="4" fill="var(--ink-primary)"/>
+            <circle cx="320" cy="50" r="4" fill="var(--ink-primary)"/>
+          </svg>
+        </div>
+
+        <!-- Bottom sheet (max 55%) -->
+        <div style="max-height: 55%; background: var(--surface-raised); border-top-left-radius: var(--radius-sheet); border-top-right-radius: var(--radius-sheet); padding: var(--space-5); overflow-y: auto;">
+          <!-- mock-only: Back link (real app uses system back) -->
+          <a href="#" class="back-link" data-navigate="screen-departure">Back</a>
+
+          <h2 class="type-departure-title" style="color: var(--ink-primary); margin-top: var(--space-3);">Plan your route</h2>
+          <p class="type-departure-body origin-line" style="color: var(--ink-secondary); margin-top: var(--space-3);">Your location</p>
+
+          <!-- Stops list -->
+          <div style="margin-top: var(--space-2);">
+            <div style="display: flex; align-items: center; gap: var(--space-2);">
+              <span class="type-departure-body stop-label" style="color: var(--ink-primary); flex: 1;">1. MG Road, Bangalore</span>
+              <button disabled style="background: none; border: none; color: var(--ink-disabled); font-size: 17px; min-width: 44px; min-height: 44px;">↑</button>
+              <button disabled style="background: none; border: none; color: var(--ink-disabled); font-size: 17px; min-width: 44px; min-height: 44px;">↓</button>
+              <button style="background: none; border: none; color: var(--signal-critical); font-size: 17px; min-width: 44px; min-height: 44px;">×</button>
+            </div>
+          </div>
+
+          <!-- Destination search input -->
+          <input type="text" class="input-field" placeholder="Search for a destination" style="margin-top: var(--space-2);">
+
+          <!-- Route summary lines -->
+          <div style="margin-top: var(--space-4);">
+            <button class="route-option" style="background: none; border: none; text-align: left; width: 100%; min-height: 44px; cursor: pointer;">
+              <span class="type-departure-body" style="color: var(--amber-core);">32 min · 18 km · via NH 44</span>
+            </button>
+            <button class="route-option" style="background: none; border: none; text-align: left; width: 100%; min-height: 44px; cursor: pointer;">
+              <span class="type-departure-body" style="color: var(--ink-primary);">36 min · 20 km · via Outer Ring Road</span>
+            </button>
+            <button class="route-option" style="background: none; border: none; text-align: left; width: 100%; min-height: 44px; cursor: pointer;">
+              <span class="type-departure-body" style="color: var(--ink-primary);">34 min · 17 km · via MG Road</span>
+            </button>
+          </div>
+
+          <!-- mock-only: "Set destination" navigates to Departure (real app uses router.back()) -->
+          <button class="btn-primary" style="margin-top: var(--space-4);" data-navigate="screen-departure">Set destination</button>
+        </div>
+      </div>
+
+      <!-- Screen: Return List -->
+      <div id="screen-return-list" class="screen" style="background: var(--surface-base); padding: var(--space-5); overflow-y: auto;">
+        <!-- mock-only: Back link (real app uses system back) -->
+        <a href="#" class="back-link" data-navigate="screen-departure">Back</a>
+
+        <h1 class="type-reflective-title" style="color: var(--ink-primary); margin-top: var(--space-3);">Rides</h1>
+
+        <p class="type-departure-label" style="color: var(--ink-tertiary); margin-top: var(--space-5);">2026</p>
+
+        <!-- Ride rows (populated by initFromData from window.DATA.RIDES; rows follow the
+             year divider at their own 12px vertical padding, like the real FlatList rows) -->
+        <div class="rides-list">
+          <!-- Rows injected by app.js initFromData() -->
+        </div>
+      </div>
+
+      <!-- Screen: Return Detail -->
+      <div id="screen-return-detail" class="screen" style="background: var(--surface-base); padding: var(--space-5); overflow-y: auto;">
+        <!-- mock-only: Back link (real app uses system back) -->
+        <a href="#" class="back-link" data-navigate="screen-return-list">Back</a>
+
+        <h1 class="type-reflective-title ride-detail-title" style="color: var(--ink-primary); margin-top: var(--space-3);">Bangalore to Mysore</h1>
+
+        <!-- RideTrace (220px-tall map card) -->
+        <div style="height: 220px; background: var(--surface-raised); border-radius: var(--radius-card); margin-top: var(--space-5); position: relative; overflow: hidden;">
+          <svg viewBox="0 0 375 220" preserveAspectRatio="xMidYMid slice" style="width: 100%; height: 100%;">
+            <rect width="375" height="220" fill="var(--surface-raised)"/>
+            <path d="M 50 180 Q 150 120 200 100 T 320 40" stroke="var(--amber-core)" stroke-width="4" fill="none"/>
+            <circle cx="320" cy="40" r="10" stroke="var(--ink-primary)" stroke-width="2" fill="none"/>
+            <circle cx="50" cy="180" r="8" fill="var(--ink-primary)"/>
+          </svg>
+        </div>
+
+        <!-- RideFacts list (stacked layout, populated by initFromData) -->
+        <div class="ride-facts" style="margin-top: var(--space-5);">
+          <div style="margin-top: var(--space-3);">
+            <p class="type-departure-label" style="color: var(--ink-secondary);">Date</p>
+            <p class="type-reflective-body" style="color: var(--ink-primary);">12 October 2026</p>
+          </div>
+          <div style="margin-top: var(--space-3);">
+            <p class="type-departure-label" style="color: var(--ink-secondary);">Distance</p>
+            <p class="type-reflective-body" style="color: var(--ink-primary);">142 km</p>
+          </div>
+          <div style="margin-top: var(--space-3);">
+            <p class="type-departure-label" style="color: var(--ink-secondary);">Moving time</p>
+            <p class="type-reflective-body" style="color: var(--ink-primary);">2h 18m</p>
+          </div>
+          <div style="margin-top: var(--space-3);">
+            <p class="type-departure-label" style="color: var(--ink-secondary);">Elapsed time</p>
+            <p class="type-reflective-body" style="color: var(--ink-primary);">2h 31m</p>
+          </div>
+          <div style="margin-top: var(--space-3);">
+            <p class="type-departure-label" style="color: var(--ink-secondary);">Average speed</p>
+            <p class="type-reflective-body" style="color: var(--ink-primary);">62 km/h</p>
+          </div>
+          <div style="margin-top: var(--space-3);">
+            <p class="type-departure-label" style="color: var(--ink-secondary);">Max speed</p>
+            <p class="type-reflective-body" style="color: var(--ink-primary);">98 km/h</p>
+          </div>
+          <div style="margin-top: var(--space-3);">
+            <p class="type-departure-label" style="color: var(--ink-secondary);">With</p>
+            <p class="type-reflective-body" style="color: var(--ink-primary);">Sam, Rio</p>
+          </div>
+        </div>
+
+        <!-- PhotoStrip -->
+        <div style="margin-top: var(--space-6);">
+          <a href="#" class="type-departure-body" style="color: var(--amber-core); text-decoration: none; min-height: 44px; display: inline-flex; align-items: center;">Add a photo</a>
+          <div style="display: flex; gap: var(--space-2); margin-top: var(--space-3); overflow-x: auto;">
+            <div style="width: 120px; height: 120px; background: var(--surface-hairline); border-radius: var(--radius-card); flex-shrink: 0;"></div>
+            <div style="width: 120px; height: 120px; background: var(--surface-hairline); border-radius: var(--radius-card); flex-shrink: 0;"></div>
+            <div style="width: 120px; height: 120px; background: var(--surface-hairline); border-radius: var(--radius-card); flex-shrink: 0;"></div>
+          </div>
+        </div>
+
+        <!-- JournalNote -->
+        <div style="margin-top: var(--space-6);">
+          <p class="type-reflective-body journal-text" style="color: var(--ink-primary);">Left Bangalore around 7am. The highway was quiet - just us and the truckers. The climb past Savandurga was the best part, everything opened up. Stopped at the viewpoint near Mysore for chai. Good ride.</p>
+        </div>
+
+        <!-- Delete link -->
+        <p class="type-departure-label" style="color: var(--ink-tertiary); margin-top: var(--space-7); min-height: 44px; display: flex; align-items: center; cursor: pointer;">Delete this ride</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

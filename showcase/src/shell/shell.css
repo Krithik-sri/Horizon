@@ -1,0 +1,319 @@
+/* ---------- aurora background ---------- */
+.aurora {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: radial-gradient(120% 90% at 50% 0%, #121628 0%, var(--night-0) 60%);
+  z-index: 0;
+  pointer-events: none;
+}
+.aurora-blob {
+  position: absolute;
+  border-radius: 50%;
+  opacity: 0.3;
+  will-change: transform;
+}
+.aurora-blob.b1 {
+  width: 52vmax;
+  height: 52vmax;
+  left: -12vmax;
+  top: -18vmax;
+  background: radial-gradient(circle, var(--violet), transparent 65%);
+  animation: blob-a 26s ease-in-out infinite alternate;
+}
+.aurora-blob.b2 {
+  width: 46vmax;
+  height: 46vmax;
+  right: -14vmax;
+  top: 8vmax;
+  background: radial-gradient(circle, var(--magenta), transparent 65%);
+  animation: blob-b 30s ease-in-out infinite alternate;
+  opacity: 0.24;
+}
+.aurora-blob.b3 {
+  width: 44vmax;
+  height: 44vmax;
+  left: 18vmax;
+  bottom: -24vmax;
+  background: radial-gradient(circle, var(--cyan), transparent 65%);
+  animation: blob-c 34s ease-in-out infinite alternate;
+  opacity: 0.22;
+}
+.aurora-blob.b4 {
+  width: 26vmax;
+  height: 26vmax;
+  right: 10vmax;
+  bottom: -6vmax;
+  display: none;
+}
+@keyframes blob-a {
+  to {
+    transform: translate(14vmax, 10vmax) scale(1.15);
+  }
+}
+@keyframes blob-b {
+  to {
+    transform: translate(-16vmax, 12vmax) scale(0.9);
+  }
+}
+@keyframes blob-c {
+  to {
+    transform: translate(10vmax, -14vmax) scale(1.2);
+  }
+}
+.aurora-dots {
+  position: absolute;
+  inset: 0;
+  opacity: 0.45;
+  -webkit-mask-image: radial-gradient(ellipse at 50% 40%, #000 10%, transparent 70%);
+  mask-image: radial-gradient(ellipse at 50% 40%, #000 10%, transparent 70%);
+}
+.aurora-grain {
+  position: absolute;
+  inset: -50%;
+  opacity: 0.06;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ---------- stage layout ---------- */
+.stage {
+  position: relative;
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) 1fr minmax(300px, 360px);
+  gap: 24px;
+  padding: 24px;
+}
+.stage.is-compact {
+  grid-template-columns: 1fr;
+}
+.stage.is-mobile {
+  padding: 0;
+}
+.stage-center {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+}
+.rail {
+  position: relative;
+  z-index: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.phone-scaler {
+  transform-origin: center center;
+}
+
+/* ---------- phone ---------- */
+.phone {
+  position: relative;
+  width: calc(var(--phone-w) + 24px);
+  height: calc(var(--phone-h) + 24px);
+  padding: 12px;
+  border-radius: 64px;
+  background: linear-gradient(145deg, #3a3f55 0%, #15171f 35%, #0b0c12 60%, #2c3042 100%);
+  box-shadow:
+    inset 0 0 0 1.5px rgba(255, 255, 255, 0.18),
+    inset 0 0 0 6px rgba(5, 4, 26, 0.9),
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 40px 120px -30px rgba(124, 92, 255, 0.45),
+    0 30px 80px -40px rgba(255, 79, 216, 0.35),
+    0 0 160px -60px rgba(34, 211, 238, 0.3);
+}
+.phone::after {
+  /* edge sheen */
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(120deg, rgba(255, 255, 255, 0.18), transparent 22%, transparent 78%, rgba(255, 255, 255, 0.1));
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  padding: 2px;
+}
+.phone-screen {
+  position: relative;
+  width: var(--phone-w);
+  height: var(--phone-h);
+  border-radius: 52px;
+  overflow: hidden;
+  background: var(--night-1);
+  isolation: isolate;
+  transform: translateZ(0);
+}
+.phone-bare {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.phone-bare::after {
+  display: none;
+}
+.phone-bare .phone-screen {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+.phone-full {
+  position: fixed;
+  inset: 0;
+}
+
+.phone-status {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 54px;
+  padding: 0 30px 0 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 90;
+  pointer-events: none;
+  color: #fff;
+  background: linear-gradient(180deg, rgba(5, 6, 11, 0.78) 0%, rgba(5, 6, 11, 0.35) 60%, transparent 100%);
+}
+/* bottom scrim so content never collides with the home indicator */
+.phone-screen::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 40px;
+  background: linear-gradient(0deg, rgba(5, 6, 11, 0.85), transparent);
+  pointer-events: none;
+  z-index: 89;
+}
+.phone-time {
+  font: 600 16px/1 var(--font-ui);
+  letter-spacing: -0.01em;
+  width: 60px;
+}
+.phone-island {
+  width: 122px;
+  height: 36px;
+  border-radius: 20px;
+  background: #000;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+.phone-icons {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 60px;
+  justify-content: flex-end;
+}
+.phone-home {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  width: 134px;
+  height: 5px;
+  margin-left: -67px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.75);
+  z-index: 90;
+  pointer-events: none;
+}
+.phone-bare .phone-island {
+  opacity: 0;
+}
+
+/* every screen fills the phone */
+.screen {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* ---------- compact: pills + drawers ---------- */
+.demo-pills {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 120;
+  display: flex;
+  gap: 8px;
+}
+.is-mobile .demo-pills {
+  top: 12px;
+  bottom: auto;
+  right: 50%;
+  transform: translateX(50%);
+  gap: 6px;
+}
+.is-mobile .demo-pill {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 11px;
+  gap: 5px;
+  opacity: 0.88;
+}
+.is-mobile .demo-pill svg {
+  width: 13px;
+  height: 13px;
+}
+.demo-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font: 600 13px/1 var(--font-display);
+  color: var(--ink-1);
+}
+.demo-pill svg {
+  position: relative;
+  z-index: 2;
+}
+.drawer-root {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+}
+.drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 4, 26, 0.6);
+  backdrop-filter: blur(8px);
+}
+.drawer {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  width: min(360px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+}
+.drawer-left {
+  left: 12px;
+}
+.drawer-right {
+  right: 12px;
+}
+.drawer-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 5;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink-2);
+}

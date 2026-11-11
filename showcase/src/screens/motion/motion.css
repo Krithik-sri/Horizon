@@ -1,0 +1,641 @@
+/* Motion — riding screen. Bands by fraction of the phone height (Horizon Line):
+   AHEAD 0–34%, NOW 34–58%, HELD 58–100%. */
+.mo-root {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--night-0);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.mo-map {
+  position: absolute;
+  inset: 0;
+}
+/* legibility scrim: darker at the top (cue) and bottom (held), clear around you */
+.mo-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    linear-gradient(180deg, rgba(5, 6, 11, 0.78) 0%, rgba(5, 6, 11, 0.35) 22%, transparent 38%),
+    linear-gradient(0deg, rgba(5, 6, 11, 0.85) 0%, rgba(5, 6, 11, 0.4) 20%, transparent 36%);
+}
+
+/* ---------- long-press ripple ---------- */
+.mo-ripple {
+  position: absolute;
+  z-index: 3;
+  width: 64px;
+  height: 64px;
+  margin: -32px 0 0 -32px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  box-shadow:
+    0 0 24px var(--accent-glow),
+    inset 0 0 18px var(--accent-glow);
+  pointer-events: none;
+}
+
+/* ---------- top row ---------- */
+.mo-top {
+  position: absolute;
+  z-index: 6;
+  top: 58px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.mo-top > * {
+  pointer-events: auto;
+}
+.mo-code {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px 0 10px;
+  border-radius: var(--r-full);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  color: var(--ink-1);
+}
+.mo-code-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+.mo-code-dot.warn {
+  background: var(--sun);
+  box-shadow: 0 0 8px var(--sun);
+}
+.mo-demo {
+  display: flex;
+  gap: 6px;
+  opacity: 0.78;
+  transition: opacity var(--t-med) ease;
+}
+.mo-demo:hover {
+  opacity: 1;
+}
+.mo-demo-btn svg {
+  width: 15px !important;
+  height: 15px !important;
+}
+.mo-demo-scale {
+  position: relative;
+  z-index: 2;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* ---------- AHEAD ---------- */
+.mo-ahead {
+  position: absolute;
+  z-index: 5;
+  top: 98px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+.mo-ahead > div:last-child {
+  align-self: stretch;
+}
+.mo-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: var(--r-full);
+  font: 500 11px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  color: var(--sun);
+}
+.mo-status.bad {
+  color: var(--coral);
+}
+.mo-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: mo-blink 1.4s ease-in-out infinite;
+}
+@keyframes mo-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.mo-cue {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  padding: 16px 18px 14px;
+  min-height: 118px;
+}
+.mo-cue-dots {
+  position: absolute;
+  inset: 0;
+  opacity: 0.55;
+  pointer-events: none;
+}
+.mo-cue.is-now {
+  animation: mo-now-pulse 1.1s ease-in-out infinite;
+}
+.mo-cue.is-now .mo-cue-glyph {
+  background: color-mix(in srgb, var(--accent) 22%, rgba(7, 9, 16, 0.6));
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+@keyframes mo-now-pulse {
+  0%,
+  100% {
+    box-shadow:
+      var(--glass-highlight),
+      0 0 30px -8px var(--accent-glow);
+  }
+  50% {
+    box-shadow:
+      var(--glass-highlight),
+      0 0 54px 2px var(--accent-glow),
+      inset 0 0 40px -12px var(--accent-glow);
+  }
+}
+.mo-cue-body {
+  position: relative;
+  z-index: 1;
+}
+.mo-cue-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.mo-cue-glyph {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition:
+    background var(--t-med) ease,
+    border-color var(--t-med) ease;
+}
+.mo-cue-glyph.off {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.mo-needle {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--ink-4);
+}
+.mo-needle i {
+  position: absolute;
+  left: 50%;
+  top: 3px;
+  width: 0;
+  height: 0;
+  margin-left: -7px;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 19px solid var(--ink-2);
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.35));
+}
+.mo-needle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: var(--ink-2);
+}
+.mo-cue-text {
+  min-width: 0;
+  flex: 1;
+}
+.mo-cue-dist {
+  font: 700 36px/1 var(--font-display);
+  letter-spacing: -0.045em;
+  font-variant-numeric: tabular-nums;
+  padding-bottom: 2px;
+}
+.mo-cue-instr {
+  margin-top: 6px;
+  font: 500 15px/1.3 var(--font-ui);
+  color: var(--ink-1);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.mo-cue-street {
+  margin-top: 10px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mo-cue-row + .mo-cue-street {
+  margin-left: 82px;
+  margin-top: 4px;
+}
+.mo-cue-off {
+  font: 600 19px/1.2 var(--font-display);
+  letter-spacing: -0.03em;
+  color: var(--ink-2);
+}
+.mo-cue-sub {
+  margin-top: 8px;
+  font: 500 12px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+}
+.mo-cue-sub.finding {
+  color: var(--ink-3);
+}
+.mo-cue-sub.rejoin {
+  color: var(--accent);
+}
+.mo-cue-foot {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.mo-cue-readout {
+  font-size: 12px;
+  color: var(--ink-2);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* ---------- NOW ---------- */
+.mo-now {
+  position: absolute;
+  z-index: 4;
+  top: 34%;
+  height: 24%;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.mo-now-glow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 340px;
+  height: 210px;
+  margin: -105px 0 0 -170px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(5, 6, 11, 0.74), rgba(5, 6, 11, 0.5) 50%, rgba(5, 6, 11, 0.2) 78%, transparent);
+}
+.mo-speed {
+  position: relative;
+  display: flex;
+  line-height: 1;
+}
+/* static, blurred copy of the number behind the digits — the glow without a filter on their ancestor */
+.mo-speed-glow {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0.1em;
+  color: var(--cyan);
+  opacity: 0.28;
+  filter: blur(22px);
+  pointer-events: none;
+}
+.mo-speed-num {
+  position: relative;
+  display: flex;
+}
+.mo-speed-none {
+  display: block;
+  height: 1.02em;
+  font-weight: 300;
+  color: var(--ink-3);
+}
+.mo-digit {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  clip-path: inset(0);
+  /* the window is taller than the glyph (more room below the baseline than above the cap), so a
+     rolling digit's edge would show as a sliver; fade the window's edges so travel stays clean */
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 3%, #000 84%, transparent 96%);
+  mask-image: linear-gradient(180deg, transparent 0%, #000 3%, #000 84%, transparent 96%);
+  height: 1.02em;
+  width: 0.78em;
+  text-align: center;
+}
+.mo-digit-ghost {
+  display: block;
+  visibility: hidden;
+}
+.mo-digit-in {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  display: block;
+  background: linear-gradient(180deg, #ffffff 15%, var(--cyan-soft) 60%, var(--cyan) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.mo-unit {
+  position: relative;
+  margin-top: 6px;
+  font-size: 11px;
+  letter-spacing: 0.32em;
+  color: var(--ink-2);
+  padding-left: 0.32em;
+}
+
+/* ---------- HELD ---------- */
+.mo-held {
+  position: absolute;
+  z-index: 5;
+  top: 58%;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+.mo-held .mo-end {
+  pointer-events: auto;
+}
+
+.mo-ptt {
+  position: absolute;
+  z-index: 3;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 42%;
+  touch-action: none;
+  cursor: pointer;
+}
+.mo-ptt-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 186px;
+  text-align: center;
+  font-size: 9px;
+  color: var(--ink-4);
+  transition: opacity var(--t-med) ease;
+}
+.mo-ptt.on .mo-ptt-hint {
+  opacity: 0;
+}
+.mo-root .mo-mic {
+  position: absolute;
+  left: 50%;
+  bottom: 92px;
+  width: 78px;
+  height: 78px;
+  margin-left: -39px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+.mo-mic svg {
+  position: relative;
+  z-index: 2;
+}
+.mo-mic-ring {
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  transition:
+    box-shadow var(--t-med) ease,
+    border-color var(--t-med) ease;
+}
+.mo-root .mo-ptt.on .mo-mic {
+  color: var(--night-0);
+  background: radial-gradient(circle at 50% 35%, var(--cyan-soft), var(--cyan) 55%, #5b8cff) !important;
+}
+.mo-ptt.on .mo-mic-ring {
+  border-color: var(--cyan-soft);
+  box-shadow:
+    0 0 0 8px rgba(34, 211, 238, 0.14),
+    0 0 50px 6px var(--accent-glow);
+}
+
+/* edge light — the bottom edge of the phone glows while you talk */
+.mo-edge {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 260px;
+  pointer-events: none;
+}
+.mo-edge-bloom {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(70% 100% at 50% 100%, rgba(34, 211, 238, 0.42), rgba(91, 140, 255, 0.16) 50%, transparent 75%);
+  animation: mo-breathe 1.6s ease-in-out infinite;
+}
+.mo-edge-line {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  bottom: 0;
+  height: 4px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, transparent, var(--cyan) 20%, #fff 50%, var(--cyan) 80%, transparent);
+  box-shadow:
+    0 0 18px 4px var(--accent-glow),
+    0 0 40px 8px rgba(34, 211, 238, 0.35);
+}
+@keyframes mo-breathe {
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.mo-root .mo-caption {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: var(--r-md);
+}
+.mo-caption-ico {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.mo-caption-text {
+  font: 500 14px/1.3 var(--font-ui);
+  color: var(--ink-1);
+}
+
+.mo-talk {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 6px; /* the caption's slot (captions are held while you talk) — clear of you and the convoy */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.mo-root .mo-talk-pill {
+  display: flex;
+  align-items: center;
+  padding: 8px 14px;
+  border-radius: 999px;
+}
+.mo-talk-label {
+  color: var(--cyan-soft);
+}
+
+.mo-root .mo-incoming {
+  position: absolute;
+  left: 16px;
+  bottom: 196px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px 0 10px;
+  border-radius: var(--r-full);
+}
+.mo-incoming-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--rc);
+  box-shadow: 0 0 10px var(--rc);
+}
+.mo-incoming-name {
+  font: 600 12px/1 var(--font-ui);
+  color: var(--ink-1);
+}
+
+.mo-root .mo-novoice {
+  position: absolute;
+  left: 50%;
+  bottom: 118px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--r-full);
+  font: 500 11px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.mo-root .mo-convoy {
+  position: absolute;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  padding: 5px 10px;
+  border-radius: var(--r-full);
+  z-index: 4;
+}
+.mo-rider {
+  position: relative;
+  transition: opacity var(--t-slow) ease;
+}
+.mo-rider.stale {
+  opacity: 0.45;
+}
+.mo-rider.stale .avatar {
+  filter: grayscale(1);
+}
+.mo-rider-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--lime);
+  border: 2px solid var(--night-1);
+  box-shadow: 0 0 6px var(--lime);
+}
+.mo-rider.stale .mo-rider-dot {
+  background: var(--ink-4);
+  box-shadow: none;
+}
+
+.mo-end {
+  position: absolute;
+  right: 18px;
+  bottom: 84px;
+  z-index: 5;
+  border-radius: 50%;
+}
+
+/* ---------- map markers seen from Motion ---------- */
+/* convoy colours a touch quieter so they never compete with the cyan route */
+.mo-root .mk-rider {
+  filter: saturate(0.75);
+}
+.mo-root .mk-rider .mk-tag {
+  transition: opacity var(--t-med) ease;
+}
+/* while you talk, the waveform owns the lower band — name tags step back */
+.mo-ptt-on .mk-tag {
+  opacity: 0;
+}
+/* arrived: the destination ring is the landmark, wrapped around you */
+.mo-arrived .mk-dest {
+  transform: scale(1.7);
+  transition: transform 600ms var(--ease-out);
+}

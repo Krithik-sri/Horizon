@@ -1,0 +1,129 @@
+/* Aurora Glass — Horizon showcase design tokens.
+   Every colour, radius, blur and timing the showcase uses lives here. */
+:root {
+  /* night base */
+  --night-0: #05060b;
+  --night-1: #0a0c14;
+  --night-2: #11141f;
+  --night-3: #1a1e2c;
+
+  /* aurora spectrum */
+  --violet: #7c5cff;
+  --violet-soft: #a594ff;
+  --cyan: #22d3ee;
+  --cyan-soft: #8beeff;
+  --magenta: #ff4fd8;
+  --magenta-soft: #ff9cea;
+  --lime: #b8ff5c;
+  --coral: #ff7a59;
+  --sun: #ffd166;
+  --rose: #ff5c8a;
+
+  /* ink */
+  --ink-1: #f4f2ff;
+  --ink-2: rgba(232, 228, 255, 0.72);
+  --ink-3: rgba(214, 208, 255, 0.48);
+  --ink-4: rgba(200, 192, 255, 0.28);
+
+  /* semantic */
+  --good: var(--lime);
+  --warn: var(--sun);
+  --bad: var(--rose);
+  --info: var(--cyan);
+
+  /* gradients */
+  --grad-aurora: linear-gradient(120deg, var(--cyan) 0%, var(--violet) 48%, var(--magenta) 100%);
+  --grad-sunset: linear-gradient(120deg, var(--sun) 0%, var(--coral) 45%, var(--magenta) 100%);
+  --grad-mint: linear-gradient(120deg, var(--lime) 0%, var(--cyan) 100%);
+  --grad-ink: linear-gradient(180deg, #ffffff 0%, #c9c2ff 100%);
+
+  /* glass */
+  --glass-fill: rgba(255, 255, 255, 0.06);
+  --glass-fill-strong: rgba(255, 255, 255, 0.1);
+  --glass-fill-deep: rgba(9, 11, 18, 0.6);
+  --glass-line: rgba(255, 255, 255, 0.14);
+  --glass-line-strong: rgba(255, 255, 255, 0.24);
+  --glass-blur: 24px;
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+
+  /* glow */
+  --glow-violet: 0 0 32px rgba(124, 92, 255, 0.45);
+  --glow-cyan: 0 0 32px rgba(34, 211, 238, 0.45);
+  --glow-magenta: 0 0 32px rgba(255, 79, 216, 0.45);
+  --glow-lime: 0 0 32px rgba(184, 255, 92, 0.4);
+
+  /* type */
+  --font-display: 'Unbounded', 'Geist', system-ui, sans-serif;
+  --font-ui: 'Geist', 'Inter', system-ui, sans-serif;
+  --font-serif: 'Instrument Serif', Georgia, serif;
+  --font-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
+
+  /* type scale */
+  --fs-hero: 112px;
+  --fs-display: 44px;
+  --fs-title: 22px;
+  --fs-body: 15px;
+  --fs-meta: 11px;
+
+  /* register accent (overridden per screen via [data-register]) */
+  --accent: var(--cyan);
+  --accent-2: var(--violet);
+  --grad-accent: var(--grad-aurora);
+  --accent-glow: rgba(34, 211, 238, 0.45);
+
+  /* radius */
+  --r-xs: 8px;
+  --r-sm: 12px;
+  --r-md: 18px;
+  --r-lg: 26px;
+  --r-xl: 34px;
+  --r-full: 9999px;
+
+  /* spacing */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+
+  /* motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --t-fast: 140ms;
+  --t-med: 260ms;
+  --t-slow: 520ms;
+
+  /* phone */
+  --phone-w: 390px;
+  --phone-h: 844px;
+}
+
+/* one colour family per register */
+[data-register='departure'] {
+  --accent: var(--lime);
+  --accent-2: var(--cyan);
+  --grad-accent: var(--grad-mint);
+  --accent-glow: rgba(184, 255, 92, 0.4);
+}
+[data-register='motion'] {
+  --accent: var(--cyan);
+  --accent-2: var(--magenta);
+  --grad-accent: linear-gradient(120deg, var(--cyan), #5b8cff);
+  --accent-glow: rgba(34, 211, 238, 0.45);
+}
+[data-register='return'] {
+  --accent: var(--coral);
+  --accent-2: var(--magenta);
+  --grad-accent: var(--grad-sunset);
+  --accent-glow: rgba(255, 122, 89, 0.45);
+}
+[data-register='shell'] {
+  --accent: var(--violet);
+  --accent-2: var(--magenta);
+  --grad-accent: linear-gradient(120deg, var(--violet), var(--magenta));
+  --accent-glow: rgba(124, 92, 255, 0.45);
+}

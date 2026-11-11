@@ -1,0 +1,401 @@
+/* Ride detail — Return register. Map hero fading into an editorial page. */
+.dt-root {
+  position: absolute;
+  inset: 0;
+}
+.dt-scroll {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+.dt-back {
+  position: absolute !important;
+  top: 60px;
+  left: 16px;
+  z-index: 5;
+}
+
+.dt-topshade {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 130px;
+  z-index: 4;
+  pointer-events: none;
+  background: linear-gradient(180deg, var(--night-0) 0%, var(--night-0) 44%, rgba(5, 6, 11, 0.85) 66%, rgba(5, 6, 11, 0.4) 84%, transparent 100%);
+}
+
+/* hero map */
+.dt-hero {
+  position: relative;
+  height: 370px;
+}
+.dt-map {
+  position: absolute !important;
+  inset: 0;
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 64%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 64%, transparent 100%);
+}
+.dt-hero-fade {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 120px;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent 0%, rgba(5, 6, 11, 0.35) 100%);
+  z-index: 2;
+}
+.dt-hero::before {
+  /* soft top shade so the status bar and back button stay legible */
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 110px;
+  background: linear-gradient(180deg, rgba(5, 6, 11, 0.7), transparent);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.dt-body {
+  position: relative;
+  z-index: 3;
+  margin-top: -84px;
+  padding: 0 20px 64px;
+}
+
+/* title */
+.dt-title {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-size: 42px;
+  line-height: 1.02;
+  font-style: italic;
+  letter-spacing: -0.02em;
+  color: var(--ink-1);
+  cursor: text;
+}
+.dt-title-empty {
+  color: var(--ink-2);
+}
+.dt-title-last {
+  white-space: nowrap;
+}
+.dt-title-pen {
+  display: inline-block;
+  margin-left: 8px;
+  vertical-align: 4px;
+  color: var(--ink-4);
+}
+.dt-title-input {
+  outline: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  padding-bottom: 2px;
+}
+.dt-title-input::placeholder {
+  color: var(--ink-4);
+}
+.dt-date {
+  margin-top: 10px;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+
+/* facts */
+.dt-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 22px;
+}
+.dt-fact {
+  position: relative;
+  padding: 14px 14px 13px;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  min-width: 0;
+}
+.dt-fact-wide,
+.dt-fact-hero {
+  grid-column: 1 / -1;
+}
+.dt-fact-hero {
+  padding: 16px 18px 14px;
+  border-radius: var(--r-lg);
+}
+.dt-fact-dots {
+  position: absolute;
+  inset: 0;
+  opacity: 0.7;
+  -webkit-mask-image: linear-gradient(250deg, #000 0%, transparent 60%);
+  mask-image: linear-gradient(250deg, #000 0%, transparent 60%);
+}
+.dt-fact .t-label {
+  position: relative;
+  font-size: 10px;
+}
+.dt-fact-v {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin-top: 8px;
+  white-space: nowrap;
+}
+.dt-fact-num {
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  color: var(--ink-1);
+  line-height: 1;
+}
+.dt-hero-num {
+  font-size: 72px;
+  font-weight: 600;
+  letter-spacing: -0.05em;
+  line-height: 0.9;
+}
+.dt-fact-unit {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  margin-right: 6px;
+}
+.dt-fact-hero .dt-fact-unit {
+  font-size: 14px;
+}
+.dt-with-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 10px;
+}
+.dt-with-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-serif);
+  font-size: 19px;
+  color: var(--ink-1);
+}
+.dt-solo {
+  margin-top: 6px;
+  font-size: 22px;
+  font-style: italic;
+  color: var(--ink-2);
+}
+
+/* sections */
+.dt-section {
+  margin-top: 30px;
+}
+.dt-section-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.dt-section-head .t-label {
+  color: var(--ink-2);
+}
+.dt-section-head .dotrule {
+  flex: 1;
+  overflow: hidden;
+}
+
+/* photo strip */
+.dt-strip {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 0 -20px;
+  padding: 8px 20px 14px;
+  scrollbar-width: none;
+}
+.dt-strip::-webkit-scrollbar {
+  display: none;
+}
+.dt-add,
+.dt-photo {
+  flex: 0 0 auto;
+  width: 124px;
+  height: 140px;
+  border-radius: 16px;
+}
+.dt-add {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  color: var(--accent);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.dt-add:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.dt-photo {
+  padding: 6px 6px 22px;
+  border: 0;
+  background: linear-gradient(170deg, #f6f1ea, #e8e0d6);
+  box-shadow:
+    0 14px 26px -12px rgba(0, 0, 0, 0.85),
+    0 0 0 1px rgba(255, 255, 255, 0.4) inset;
+  line-height: 0;
+  cursor: zoom-in;
+}
+.dt-photo-pending {
+  position: relative;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  padding: 0;
+  cursor: default;
+}
+.dt-pending-fill {
+  position: absolute;
+  inset: 0;
+}
+.dt-photo-pending .t-label {
+  position: relative;
+}
+
+/* lightbox */
+.dt-lightbox {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgba(5, 6, 11, 0.82);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.dt-lightbox-frame {
+  padding: 10px 10px 0;
+  border-radius: 18px;
+  background: linear-gradient(170deg, #f6f1ea, #e8e0d6);
+  box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.9);
+  line-height: 0;
+}
+.dt-lightbox-cap {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 14px 4px 14px;
+  line-height: 1.2;
+  color: #2a2230;
+}
+.dt-lightbox-cap .t-serif {
+  font-size: 20px;
+  font-style: italic;
+}
+.dt-lightbox-cap .t-mono {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+}
+.dt-lightbox-close {
+  position: absolute !important;
+  top: 60px;
+  right: 16px;
+}
+
+/* journal */
+.dt-journal {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 2px 0;
+  font-size: 21px;
+  line-height: 1.42;
+  color: var(--ink-1);
+  cursor: text;
+}
+.dt-journal-empty {
+  font-style: italic;
+  color: var(--ink-3);
+}
+.dt-textarea {
+  height: auto;
+  min-height: 150px;
+  padding: 14px 16px;
+  resize: none;
+  font-size: 19px;
+  line-height: 1.4;
+  display: block;
+}
+.dt-journal-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+/* footer */
+.dt-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  margin-top: 40px;
+}
+.dt-code {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--ink-4);
+}
+
+/* delete sheet */
+.dt-sheet h2 {
+  margin: 4px 0 8px;
+  font-size: 30px;
+  font-style: italic;
+  font-weight: 400;
+  color: var(--ink-1);
+}
+.dt-sheet p {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.dt-sheet-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+/* not found */
+.dt-missing {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 0 40px;
+  text-align: center;
+}
+.dt-missing p {
+  margin: 0;
+  font-size: 26px;
+  font-style: italic;
+  color: var(--ink-2);
+}
